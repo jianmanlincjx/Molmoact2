@@ -177,3 +177,6 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+# missing upstream LFS stubs
+tests/artifacts/
