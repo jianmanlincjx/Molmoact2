@@ -1,0 +1,11 @@
+[submodule "lerobot"]
+	path = lerobot
+	url = https://github.com/allenai/lerobot
+	branch = molmoact2-policy
+[submodule "YAM"]
+	path = YAM
+	url = https://github.com/Everloom-129/YAM.git
+[submodule "EVA_DROID"]
+	path = EVA_DROID
+	url = https://github.com/penn-pal-lab/eva_pal_share.git
+	branch = eva-droid
