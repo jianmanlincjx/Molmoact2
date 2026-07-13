@@ -1,6 +1,6 @@
 [submodule "lerobot"]
 	path = lerobot
-	url = https://github.com/allenai/lerobot
+	url = git@github.com:jianmanlincjx/lerobot.git
 	branch = molmoact2-policy
 [submodule "YAM"]
 	path = YAM
