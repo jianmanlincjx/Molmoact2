@@ -34,6 +34,21 @@ bash scripts/libero_goal_prior/train_stage2.sh
 - VLM + action expert 以全量学习率联合训练（不下调）；ViT 使用更长的 warmup；
   `goal` 参数组有自己独立的 LR/warmup。
 
+## Baseline — 普通 MolmoAct2 训练（对照组）
+
+```bash
+bash scripts/libero_goal_prior/train_baseline.sh
+```
+
+- 与两阶段实验相同的 clean bootstrap：Molmo2-ER 的 VLM 权重 + 随机初始化的
+  action expert（`USE_ER_BOOTSTRAP=false` 可关闭，退回加载官方 MolmoAct2 AE）。
+- **不带任何 goal-pose**：开视觉、全模型联合训练、损失仅 flow matching。
+- 默认 `STEPS=40000`（= stage1 10k + stage2 30k，与实验组总步数对齐）、
+  `BATCH_SIZE=32`/卡、seed 1000、GPU 0-6，输出到
+  `outputs/libero_goal_prior/seed_1000/baseline`。
+- 无需 `create_canonical_init`：直接由 `train_libero_molmoact2.sh` 传 bootstrap
+  参数完成 ER + 随机 AE 的初始化。
+
 ## 说明
 
 - v1 的位姿目标是归一化后的 chunk 末端 `observation.state` 向量（8 维：
