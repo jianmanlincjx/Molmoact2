@@ -35,12 +35,17 @@ L = L_flow + pose_recon_loss_weight * L_pose
 
 ## 参数与 checkpoint
 
-- v1 参数名保持不变：`goal_se3_encoder`、`goal_queries`、`goal_pose_decoder`。
-- v2 使用独立前缀：`semantic_visual_aggregator`、
+模块按实际阶段按需创建，不保留无关网络：
+
+- Stage1：只创建 `goal_se3_encoder`；
+- v1 Stage2：只创建 `goal_queries`，并在开启位姿监督时创建
+  `goal_pose_decoder`；
+- v2 Stage2：只创建 `semantic_visual_aggregator` 与
   `semantic_visual_pose_decoder`。
-- Stage1 -> v2 加载使用 LeRobot `strict=False`：VLM/AE/v1 goal 模块匹配加载；
-  新 `semantic_visual_*` 参数随机初始化，不发生同名 shape mismatch。
-- v2 中旧 goal query/decoder 冻结且不参与 optimizer。
+
+现有 Stage1 checkpoint 由旧代码保存，可能包含随机且未训练的 legacy
+`goal_queries/goal_pose_decoder`。Stage1 -> v2 加载使用 LeRobot `strict=False`：
+VLM/AE 正常加载，多余 legacy keys 被忽略，新 `semantic_visual_*` 参数随机初始化。
 
 ## Optimizer / scheduler
 

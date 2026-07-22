@@ -17,7 +17,7 @@
 | 实验 | 主仓分支 | 主仓 commit | 子模块分支 | 子模块 commit | tag |
 | --- | --- | --- | --- | --- | --- |
 | exp1（goal-pose v1） | `feat/goal-pose-prior` | `c564ee8` | `feat/goal-pose-prior` | `a41a1ff` | v1 代码快照（10k 评测） |
-| exp2（semantic-visual v2） | `feat/goal-pose-prior-v2` | `ed45544` | `feat/goal-pose-prior-v2` | `bd1d2b58` | Stage1 沿用 exp1 |
+| exp2（semantic-visual v2） | `feat/goal-pose-prior-v2` | `ed45544` | `feat/goal-pose-prior-v2` | `f903be74` | Stage1 沿用 exp1 |
 
 记录格式（模板）：
 
@@ -47,11 +47,11 @@
 
 ## exp2 — semantic-visual recurrent prior v2 — 2026-07-22
 
-- 代码：分支 `feat/goal-pose-prior-v2`（主仓 `ed45544` / 子模块 `bd1d2b58`）。
+- 代码：分支 `feat/goal-pose-prior-v2`（主仓 `ed45544` / 子模块 `f903be74`）。
 - 初始化：直接加载 exp1 Stage1 `checkpoints/010000`；Stage1 结构与权重不变，VLM/AE 完整继承；v2 `semantic_visual_*` 模块随机初始化。
 - Stage2：100 个 768-D learnable queries 跨 36 层递归；每层先 cross-attend vision-fused language/state hidden，再 cross-attend image patch hidden。AE 保留原 language/state KV、mask raw image KV，并追加对应层 100-token synthetic KV；AE 只单向读取，不写回 query。
 - 位姿监督：最终层 100 tokens 通过 attention pooling 解码 normalized 8D target pose；`L = L_flow + L_pose`。
 - 优化：VLM/ViT/connector/AE/semantic 均为 LR `1e-5`，不降低 AE LR；warmup VLM/connector/AE/semantic=1000、ViT=2000。
 - 预算：7 GPU，bs32/卡（有效 224），**30000 步，每 5000 步保存**；输出 `lerobot/outputs/libero_goal_prior_v2/seed_1000/stage2`。
-- 验证：52 个 MolmoAct2 单测通过；Stage1→v2 真实 2-step smoke 通过（AE fingerprint=`ec1e80...`，仅 `semantic_visual_*` 为预期 missing keys，flow/pose/grad 有限）；保存 v2 checkpoint 后的 LIBERO 1-step 端到端推理 smoke 通过；bs1/bs4 单卡峰值显存约 43.6GB。
+- 验证：53 个 MolmoAct2 单测通过；Stage1→v2 真实 smoke 通过（AE fingerprint=`ec1e80...`，`semantic_visual_*` 为预期 missing keys；旧 Stage1 checkpoint 的未训练 legacy goal keys 可由 `strict=False` 忽略；flow/pose/grad 有限）；保存 v2 checkpoint 后的 LIBERO 1-step 端到端推理 smoke 通过；bs1/bs4 单卡峰值显存约 43.6GB。最终代码按阶段仅创建实际使用的 goal/semantic 模块，v2 总参数由 5.475B 降至 5.464B。
 - 评测：TBD（优先 5k/10k/15k in-dist）。
