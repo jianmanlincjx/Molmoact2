@@ -27,6 +27,16 @@ build/
 venv/
 env/
 
+# Local caches / temp (keep off /root — see scripts/env.sh)
+.cache/
+.tmp/
+lerobot/.venv/
+lerobot/.python-version
+
+# Local-only research artifacts (large / personal notes)
+report.html
+idea_sync.html
+
 # Secrets
 .env
 .env.*

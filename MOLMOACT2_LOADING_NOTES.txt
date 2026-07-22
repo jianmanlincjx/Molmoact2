@@ -1,0 +1,42 @@
+MolmoAct2 / Molmo2-ER 加载说明
+
+当前 LIBERO 训练配置：
+
+- checkpoint_path 指向 Checkpoint/MolmoAct2。
+- vlm_checkpoint_path 指向 Checkpoint/Molmo2-ER。
+
+含义：
+
+- MolmoAct2 主要作为模型模板来源：
+  提供模型结构、action expert 结构、processor/tokenizer、机器人 special tokens、
+  prompt/input 打包逻辑，以及 continuous action 预测接口。
+
+- Molmo2-ER 作为 VLM 权重来源：
+  加载 vision backbone、LLM transformer，以及其他能安全匹配的 VLM 权重。
+
+- 官方 MolmoAct2 的行为权重不是主要初始化来源：
+  在 Molmo2-ER bootstrap baseline 中，我们有意不加载官方 MolmoAct2 的
+  action expert 权重，action expert 从随机初始化开始训练。
+
+实验解释：
+
+- Baseline：
+  MolmoAct2 结构 + Molmo2-ER VLM 权重 + 随机初始化 action expert。
+
+- Stage 1：
+  使用同样初始化，但关闭视觉输入，冻结 VLM，只训练 action expert。
+
+- Stage 2：
+  通过 pretrained_path 加载 Stage 1 checkpoint，重新打开视觉输入，然后联合微调 VLA。
+
+归一化：
+
+- LIBERO 训练使用当前数据集或 filtered dataset 的统计量。
+- 这些训练配置里 norm_tag 为 null，因此不是使用官方 MolmoAct2 的机器人 norm tag。
+
+迁移注意：
+
+- 保留 checkpoint_path 和 vlm_checkpoint_path 分离的 bootstrap 逻辑。
+- 保留防止加载 MolmoAct2 官方 action expert 权重的保护逻辑。
+- 如果迁移两阶段实验，需要保留 disable_visual_input 逻辑，以及 Stage 2 加载
+  processor 时强制恢复视觉输入配置的逻辑。
