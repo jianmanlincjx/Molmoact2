@@ -18,6 +18,7 @@
 | --- | --- | --- | --- | --- | --- |
 | exp1（goal-pose v1） | `feat/goal-pose-prior` | `c564ee8` | `feat/goal-pose-prior` | `a41a1ff` | v1 代码快照（10k 评测） |
 | exp2（semantic-visual v2） | `feat/goal-pose-prior-v2` | `ed45544` | `feat/goal-pose-prior-v2` | `f903be74` | Stage1 沿用 exp1 |
+| exp2a（depth-grouped v2b） | `feat/goal-pose-prior-v2` | `46a45bc` | `feat/goal-pose-prior-v2` | `ab685e29` | 6 组 latent aggregator + non-RTC 推理修复 |
 
 记录格式（模板）：
 
@@ -62,6 +63,7 @@
 
 ## exp2a — two-group semantic-visual prior v2b — 2026-07-22
 
+- 代码：分支 `feat/goal-pose-prior-v2`（主仓 `46a45bc` / 子模块 `ab685e29`）。
 - 定位：替代已停止的 exp2，作为下一版主方案；同时解决 pose 读出瓶颈、token 间无直接通信和单套聚合器跨全部深度共享的问题。
 - 初始化：同 exp2，直接加载 exp1 Stage1 `checkpoints/010000`；VLM/AE 完整继承，`semantic_visual_*` 随机初始化。
 - Stage2：总数仍为 100×768 latent tokens；前 8 个定义为 pose 组，后 92 个定义为 context 组。每层先做全局 latent self-attention，再依次 cross-attend language/state 与 image。36 层分成连续 6 组，每组拥有独立 self/semantic/visual attention 和 latent→AE K/V projection，并在组内 6 层复用；token 跨组连续递归、不重置。全部 100 个 synthetic KV 仍进入 AE。
