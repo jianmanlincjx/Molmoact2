@@ -5,7 +5,7 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 source "${WS}/scripts/activate_train_env.sh"
 
-DEFAULT_POLICY_PATH="${WS}/lerobot/outputs/libero_goal_prior_v2b/seed_1000/stage2/checkpoints/005000/pretrained_model"
+DEFAULT_POLICY_PATH="${WS}/lerobot/outputs/libero_goal_prior_v2b/seed_1000/stage2/checkpoints/020000/pretrained_model"
 POLICY_PATH="${1:-${POLICY_PATH:-${DEFAULT_POLICY_PATH}}}"
 if [[ -z "${POLICY_PATH}" || ! -f "${POLICY_PATH}/config.json" ]]; then
   echo "Goal-pose v2b checkpoint not found: ${POLICY_PATH}" >&2
@@ -32,6 +32,9 @@ expected = {
     "semantic_visual_num_layer_groups": 6,
     "mask_image_from_action_expert": True,
     "enable_pose_reconstruction": True,
+    "pose_recon_loss_weight": 0.3,
+    "chunk_size": 10,
+    "n_action_steps": 10,
 }
 mismatches = [
     f"{key}: expected {want!r}, got {cfg.get(key)!r}"
