@@ -8,7 +8,7 @@
 | 实验 | 主仓分支 | 主仓 commit | 子模块分支 | 子模块 commit | tag |
 | --- | --- | --- | --- | --- | --- |
 | v1（4-token goal-pose） | `feat/goal-pose-prior` | `d288f5d` | `feat/goal-pose-prior` | `f888ad14` | 10k inference-fixed |
-| 当前 v2b（depth-grouped） | `feat/goal-pose-prior-v2` | _(push 后回填)_ | `feat/goal-pose-prior-v2` | `e13fe164` | in-dist 20k + plus 评测 |
+| 当前 v2b（depth-grouped） | `feat/goal-pose-prior-v2` | `de781fa` | `feat/goal-pose-prior-v2` | `e13fe164` | in-dist 20k + plus 评测 |
 
 ---
 
