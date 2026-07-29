@@ -34,9 +34,7 @@ REQUIRED = {
     "lr_vit",
     "lr_connector",
     "lr_action_expert",
-    "lr_semantic_visual",
     "flow",
-    "pose",
 }
 FIELDS = (
     "step",
@@ -64,7 +62,7 @@ def parse_metrics(log_path: Path, pose_weight: float) -> list[dict[str, float]]:
     text = ANSI_PATTERN.sub("", log_path.read_text(encoding="utf-8", errors="replace"))
     records_by_step: dict[int, dict[str, float]] = {}
     for segment in text.splitlines():
-        if " flow:" not in segment or " pose:" not in segment or " loss:" not in segment:
+        if " flow:" not in segment or " loss:" not in segment:
             continue
         progress = PROGRESS_PATTERN.search(segment)
         if progress is None:
@@ -78,20 +76,20 @@ def parse_metrics(log_path: Path, pose_weight: float) -> list[dict[str, float]]:
             "epoch": tokens["epch"],
             "loss": tokens["loss"],
             "flow_loss": tokens["flow"],
-            "pose_loss": tokens["pose"],
-            "weighted_pose_loss": pose_weight * tokens["pose"],
+            "pose_loss": tokens.get("pose", float("nan")),
+            "weighted_pose_loss": pose_weight * tokens.get("pose", float("nan")),
             "grad_norm": tokens["grdn"],
             "lr": tokens["lr"],
             "lr_vlm": tokens["lr_vlm"],
             "lr_vit": tokens["lr_vit"],
             "lr_connector": tokens["lr_connector"],
             "lr_action_expert": tokens["lr_action_expert"],
-            "lr_semantic_visual": tokens["lr_semantic_visual"],
+            "lr_semantic_visual": tokens.get("lr_semantic_visual", float("nan")),
             "memory_gb": tokens["mem_gb"],
             "update_s": tokens["updt_s"],
             "data_s": tokens["data_s"],
         }
-        if all(math.isfinite(value) for value in record.values()):
+        if all(math.isfinite(tokens[name]) for name in REQUIRED):
             records_by_step[int(record["step"])] = record
     return [records_by_step[step] for step in sorted(records_by_step)]
 

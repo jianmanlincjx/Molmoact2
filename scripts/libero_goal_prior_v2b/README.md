@@ -67,5 +67,5 @@ bash scripts/libero_goal_prior_v2b/train_stage2.sh
 bash scripts/libero_eval/eval_libero_v2b_checkpoint.sh
 ```
 
-默认评测 20k checkpoint，使用 GPU7，每 task 32 rollouts，并保存全部视频；
+默认评测 25k checkpoint，使用 GPU7，每 task 32 rollouts，并保存全部视频；
 实时准确率写入各 suite 目录的 `realtime_accuracy.json`。

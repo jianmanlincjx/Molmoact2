@@ -52,7 +52,7 @@ WANDB_ENTITY="${WANDB_ENTITY:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-molmoact2-libero}"
 
 mkdir -p "$(dirname "${OUTPUT_DIR}")"
-LOG_FILE="${LOG_FILE:-${OUTPUT_DIR}.log}"
+LOG_FILE="${LOG_FILE:-${OUTPUT_DIR}.console.log}"
 mkdir -p "$(dirname "${LOG_FILE}")"
 
 if [[ -z "${RESUME_CHECKPOINT}" && "${RESUME_MODE}" == "auto" ]]; then
@@ -183,4 +183,5 @@ if [[ "${DRY_RUN:-false}" == "true" ]]; then
   exit 0
 fi
 
-exec "${CMD[@]}"
+set -o pipefail
+"${CMD[@]}" 2>&1 | tee -a "${LOG_FILE}"

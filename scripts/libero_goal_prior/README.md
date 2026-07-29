@@ -45,7 +45,7 @@ bash scripts/libero_goal_prior/train_baseline.sh
 - **不带任何 goal-pose**：开视觉、全模型联合训练、损失仅 flow matching。
 - 默认 `STEPS=40000`（= stage1 10k + stage2 30k，与实验组总步数对齐）、
   `BATCH_SIZE=32`/卡、seed 1000、GPU 0-6，输出到
-  `outputs/libero_goal_prior/seed_1000/baseline`。
+  `outputs/libero_goal_prior/seed_1000/libero_baseline`。
 - 无需 `create_canonical_init`：直接由 `train_libero_molmoact2.sh` 传 bootstrap
   参数完成 ER + 随机 AE 的初始化。
 

@@ -5,7 +5,7 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 source "${WS}/scripts/activate_train_env.sh"
 
-DEFAULT_POLICY_PATH="${WS}/lerobot/outputs/libero_goal_prior_v2b/seed_1000/stage2/checkpoints/020000/pretrained_model"
+DEFAULT_POLICY_PATH="${WS}/lerobot/outputs/libero_goal_prior_v2b/seed_1000/stage2/checkpoints/025000/pretrained_model"
 POLICY_PATH="${1:-${POLICY_PATH:-${DEFAULT_POLICY_PATH}}}"
 if [[ -z "${POLICY_PATH}" || ! -f "${POLICY_PATH}/config.json" ]]; then
   echo "Goal-pose v2b checkpoint not found: ${POLICY_PATH}" >&2

@@ -8,7 +8,7 @@
 | 实验 | 主仓分支 | 主仓 commit | 子模块分支 | 子模块 commit | tag |
 | --- | --- | --- | --- | --- | --- |
 | v1（4-token goal-pose） | `feat/goal-pose-prior` | `d288f5d` | `feat/goal-pose-prior` | `f888ad14` | 10k inference-fixed |
-| 当前 v2b（depth-grouped） | `feat/goal-pose-prior-v2` | `f008856` | `feat/goal-pose-prior-v2` | `40810a64` | 20k 评测 |
+| 当前 v2b（depth-grouped） | `feat/goal-pose-prior-v2` | _(push 后回填)_ | `feat/goal-pose-prior-v2` | `e13fe164` | in-dist 20k + plus 评测 |
 
 ---
 
@@ -27,5 +27,6 @@
 - 架构：100×768 tokens（8 pose + 92 context）；每层 `self-attn → semantic cross-attn → visual cross-attn`；36 层分 6 组，全部 synthetic KV 进入 AE。
 - 损失：前 8 tokens 经 LayerNorm + concat decoder 预测 8D pose；`L = L_flow + 0.3 L_pose`。
 - 训练：7×A800，bs32/卡，30k，每 5k 保存；聚合器 173.6M 参数。
-- 推理：non-RTC learned-context 与实时准确率路径已由 59 个测试覆盖。
-- 状态：主训练继续；10k Spatial=82.5%、Object=80.63%；20k checkpoint 正在评测。v1/v2b 统一每任务 32 rollouts。
+- 推理：non-RTC learned-context 与实时准确率路径已由测试覆盖。
+- In-dist（每任务 32 eps）：ours 20k **82.50%** vs baseline 30k **69.45%**（+13.05 pp）；Goal +25.6、Spatial +14.4、10 +9.4、Object +2.8。
+- LIBERO-Plus：`base_category` 协议（排除 Language Instructions）；主对比 checkpoint = v2b 20k vs baseline 30k。

@@ -16,6 +16,8 @@ EVAL_SEED="${EVAL_SEED:-1000}"
 EPISODES_PER_TASK="${EPISODES_PER_TASK:-10}"
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-10}"
 MAX_EPISODES_RENDERED="${MAX_EPISODES_RENDERED:-${EPISODES_PER_TASK}}"
+SAMPLES_PER_CELL="${SAMPLES_PER_CELL:-2}"
+PLUS_PROTOCOL="${PLUS_PROTOCOL:-base_category}"
 GPU_IDS=(${EVAL_GPU_IDS:-0 1 2 3})
 SUITES=(libero_object libero_10 libero_goal libero_spatial)
 RESOURCE_ROOT="${LIBERO_RESOURCE_ROOT:-/data2/JM/Code/molmo_serious/molmoact2-main}"
@@ -55,13 +57,15 @@ python "${WS}/scripts/libero_eval/build_libero_plus_manifest.py" \
   --classification "${CLASSIFICATION}" \
   --output "${EVAL_ROOT}/task_manifest.json" \
   --seed "${EVAL_SEED}" \
-  --samples-per-cell 3 \
+  --protocol "${PLUS_PROTOCOL}" \
+  --samples-per-cell "${SAMPLES_PER_CELL}" \
   --episodes-per-task "${EPISODES_PER_TASK}"
 
 cat >"${EVAL_ROOT}/run_manifest.json" <<EOF
 {
   "benchmark": "libero_plus",
-  "protocol": "balanced",
+  "protocol": "${PLUS_PROTOCOL}",
+  "samples_per_cell": ${SAMPLES_PER_CELL},
   "policy_path": "${POLICY_PATH}",
   "checkpoint_label": "${CHECKPOINT_LABEL}",
   "episodes_per_task": ${EPISODES_PER_TASK},
@@ -74,7 +78,7 @@ EOF
 if [[ "${DRY_RUN:-false}" == "true" ]]; then
   echo "[dry-run] policy=${POLICY_PATH}"
   echo "[dry-run] output=${EVAL_ROOT}"
-  echo "[dry-run] protocol=balanced tasks=360 episodes/task=${EPISODES_PER_TASK}"
+  echo "[dry-run] protocol=${PLUS_PROTOCOL} samples/cell=${SAMPLES_PER_CELL} episodes/task=${EPISODES_PER_TASK}"
   echo "[dry-run] suites=${SUITES[*]} gpus=${GPU_IDS[*]}"
   exit 0
 fi
@@ -103,7 +107,7 @@ PY
   (
     printf '{"status":"running","gpu":"%s"}\n' "${gpu}" >"${output_dir}/process_status.json"
     set +e
-    CUDA_VISIBLE_DEVICES="${gpu}" MUJOCO_EGL_DEVICE_ID=0 \
+    CUDA_VISIBLE_DEVICES="${gpu}" MUJOCO_EGL_DEVICE_ID="${gpu}" \
       python -m lerobot.scripts.lerobot_eval \
         --policy.path="${POLICY_PATH}" \
         --policy.device=cuda \
