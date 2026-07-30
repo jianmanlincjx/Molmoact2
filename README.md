@@ -1,4 +1,4 @@
-# Learning Visually Steerable Action Priors for Visual Generalization in Robot Manipulation
+# Learning Visually Steerable Action Priors for Generalizable Robot Manipulation
 
 > **Decoupling visual goal inference from goal-conditioned motion generation.**
 
@@ -93,7 +93,7 @@ Because no image enters this stage, the learned prior cannot rely on a direct ma
 
 ### 3.3 Stage 2: aggregating a Visual Steering Condition
 
-**Overview.** Stage 2 is initialized from the Stage-1 checkpoint and therefore inherits the Action Expert weights that encode the target-pose-conditioned motion prior. Because the future target pose is unavailable at inference time, Stage 2 introduces learnable tokens that aggregate the required spatial goal and complementary scene constraints from the current image-language-state context. Pose reconstruction grounds part of this representation in the same future target used in Stage 1, while the complete representation conditions the Action Expert for action generation. This aligns the two stages through shared target semantics and a shared Action Expert conditioning interface.
+**Overview.** Stage 2 is initialized from the Stage-1 checkpoint and therefore inherits the Action Expert weights that encode the target-pose-conditioned motion prior. Because **the future target pose is unavailable at inference time**, Stage 2 introduces **learnable tokens** that aggregate **the required spatial goal and complementary scene constraints** from the current image-language-state context. Pose reconstruction grounds part of this representation in the same future target used in Stage 1, while the complete representation conditions the Action Expert for action generation. This aligns the two stages through **shared target semantics** and a **shared Action Expert conditioning interface**.
 
 <p align="center">
   <img src="./stage2_training.png" alt="Stage 2: Visual Goal-Pose Token-Based Action Prior Steering" width="90%">
