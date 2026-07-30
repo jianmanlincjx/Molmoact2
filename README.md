@@ -393,17 +393,6 @@ OUTPUT_DIR=/path/to/output \
 bash scripts/libero_goal_prior_v3/train_stage2.sh
 ```
 
-Stage-2 smoke test:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 \
-BATCH_SIZE=1 \
-STEPS=2 \
-SAVE_CHECKPOINT=false \
-OUTPUT_DIR=lerobot/outputs/libero_goal_prior_v3/smoke \
-bash scripts/libero_goal_prior_v3/train_stage2.sh
-```
-
 ### 6.4 Normalization validation
 
 `fix_stats.sh` performs the following operations:
