@@ -14,12 +14,14 @@ if [[ -z "${POLICY_PATH}" || ! -f "${POLICY_PATH}/config.json" ]]; then
 fi
 POLICY_PATH="$(cd "${POLICY_PATH}" && pwd)"
 
-python - "${POLICY_PATH}/config.json" <<'PY'
+EVAL_VARIANT="${EVAL_VARIANT:-v2b}"
+python - "${POLICY_PATH}/config.json" "${EVAL_VARIANT}" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as f:
     cfg = json.load(f)
+variant = sys.argv[2]
 expected = {
     "type": "molmoact2",
     "enable_goal_pose": True,
@@ -49,11 +51,11 @@ if not (isinstance(pose_tokens, int) and 1 <= pose_tokens < cfg.get("num_semanti
     )
 if mismatches:
     raise SystemExit(
-        "Refusing to evaluate: checkpoint is not Goal-Pose Prior v2b (scheme-2a):\n  "
+        "Refusing to evaluate: checkpoint is not a v2b-compatible semantic-visual Goal-Pose Prior:\n  "
         + "\n  ".join(mismatches)
     )
 print(
-    "[eval] verified v2b:"
+    f"[eval] verified {variant}:"
     f" mode={cfg['goal_conditioning_mode']}"
     f" tokens={cfg['num_semantic_visual_tokens']}"
     f" pose_tokens={pose_tokens}"
@@ -93,6 +95,7 @@ PY
 
 checkpoint_step="$(basename "$(dirname "${POLICY_PATH}")")"
 CHECKPOINT_LABEL="${CHECKPOINT_LABEL:-goal_prior_v2b_${checkpoint_step}}"
+MODEL_LABEL="${MODEL_LABEL:-goal_pose_prior_v2b}"
 EVAL_ROOT="${EVAL_ROOT:-${WS}/lerobot/outputs/libero_eval/${CHECKPOINT_LABEL}/libero_seed_${EVAL_SEED}}"
 mkdir -p "${EVAL_ROOT}"
 
@@ -101,7 +104,7 @@ cat >"${EVAL_ROOT}/run_manifest.json" <<EOF
   "benchmark": "libero",
   "policy_path": "${POLICY_PATH}",
   "checkpoint_label": "${CHECKPOINT_LABEL}",
-  "model": "goal_pose_prior_v2b",
+  "model": "${MODEL_LABEL}",
   "suites": ["libero_spatial", "libero_object", "libero_10", "libero_goal"],
   "episodes_per_task": ${EPISODES_PER_TASK},
   "max_episodes_rendered": ${MAX_EPISODES_RENDERED},

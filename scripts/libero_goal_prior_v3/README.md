@@ -4,6 +4,12 @@ v3 **不改训练代码 / 模型结构**，只修正数据集 `meta/stats.json` 
 `observation.state` 与 `action` 的 q01/q99（以及配套的 min/max/mean/std），
 再按 v2b 同配置重训 Stage2。
 
+复现使用 [`lerobot/libero`](https://huggingface.co/datasets/lerobot/libero)
+数据集的固定 revision
+[`1595a93b43aa055e55c127a4f0b4a99bb8035447`](https://huggingface.co/datasets/lerobot/libero/tree/1595a93b43aa055e55c127a4f0b4a99bb8035447)。
+该 Hub revision 保留原始统计量；下载到可写本地目录后，必须先运行
+`fix_stats.sh`，再开始 v3 两阶段训练。
+
 ## 为什么要做
 
 本地 LIBERO 的旧分位数严重偏窄，例如 state Z 的 q01/q99 ≈ `[0.64, 0.88]`，

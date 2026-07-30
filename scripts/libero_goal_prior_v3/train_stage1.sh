@@ -34,6 +34,7 @@ USE_ER_BOOTSTRAP="${USE_ER_BOOTSTRAP:-true}"
 VLM_CHECKPOINT_PATH="${VLM_CHECKPOINT_PATH:-${WS}/Checkpoint/Molmo2-ER}"
 
 DATASET_ROOT="${DATASET_ROOT:-/data2/JM/dataset/libero_lerobot_format}"
+export DATASET_REPO_ID="${DATASET_REPO_ID:-lerobot/libero}"
 STATS_JSON="${DATASET_ROOT}/meta/stats.json"
 STATS_NOTE="${DATASET_ROOT}/meta/stats.v3_recompute_note.json"
 STATS_OLD="${DATASET_ROOT}/meta/stats.pre_v3_bad_quantiles.json"

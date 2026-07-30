@@ -253,8 +253,8 @@ flowchart LR
 
 Specifically:
 
-- `CHECKPOINT_PATH=Checkpoint/MolmoAct2` provides the complete model template.
-- `VLM_CHECKPOINT_PATH=Checkpoint/Molmo2-ER` overlays the VLM weights.
+- [`allenai/MolmoAct2`](https://huggingface.co/allenai/MolmoAct2) at revision `e432d85f6e039edca44afb93c262f3084ab72a9c` provides the complete model template through `CHECKPOINT_PATH`.
+- [`allenai/Molmo2-ER`](https://huggingface.co/allenai/Molmo2-ER) at revision `dab22564403d2607855bb1fffb0721285b445081` provides the VLM bootstrap weights through `VLM_CHECKPOINT_PATH`.
 - `randomize_action_expert=true` explicitly reinitializes the Action Expert.
 - Stage 1 trains the Action Expert and the SE(3) encoder.
 - Stage 2 strictly loads the v3 Stage-1 `010000` checkpoint and randomly initializes the learnable queries, semantic-visual aggregator, and pose decoder.
@@ -262,7 +262,11 @@ Specifically:
 
 ### 6.2 LeRobot dataset contract
 
-The current training entry point consumes a local dataset in LeRobot format. At minimum, the dataset must provide:
+The LIBERO experiments use [`lerobot/libero`](https://huggingface.co/datasets/lerobot/libero) at revision [`1595a93b43aa055e55c127a4f0b4a99bb8035447`](https://huggingface.co/datasets/lerobot/libero/tree/1595a93b43aa055e55c127a4f0b4a99bb8035447). This exact revision matches the local training data: 1,693 episodes, 273,465 frames, 40 tasks, two 256×256 camera streams, and a 10 Hz sampling rate. Although other Hub repositories expose equivalent LIBERO conversions, they should not be assumed byte- or statistics-identical to this snapshot.
+
+The Hub snapshot contains the original quantile statistics. v3 first downloads it into a writable local directory and then runs `fix_stats.sh` to recompute `observation.state` and `action` statistics in place. The corrected local `meta/stats.json` must remain paired with all checkpoints trained from it.
+
+At minimum, a compatible LeRobot dataset must provide:
 
 - image observations;
 - `observation.state`;
@@ -291,13 +295,13 @@ git clone --branch feat/goal-pose-prior-v3 \
 cd Molmoact2
 
 # Pin the immutable v3 snapshot. The tag records the matching LeRobot revision.
-git checkout goal-pose-prior-v3-20260730
+git checkout goal-pose-prior-v3-20260730-r2
 git submodule sync -- lerobot
 git submodule update --init --recursive lerobot
 
 # Expected revisions:
 git describe --tags --exact-match
-# goal-pose-prior-v3-20260730
+# goal-pose-prior-v3-20260730-r2
 git -C lerobot rev-parse --short HEAD
 # b3a70086
 ```
@@ -306,7 +310,7 @@ For an existing clone, replace the `git clone` step with:
 
 ```bash
 git fetch origin feat/goal-pose-prior-v3 --tags
-git checkout goal-pose-prior-v3-20260730
+git checkout goal-pose-prior-v3-20260730-r2
 git submodule sync -- lerobot
 git submodule update --init --recursive lerobot
 ```
@@ -319,12 +323,28 @@ uv sync --extra training --extra molmoact2 --extra libero
 cd ..
 ```
 
-Configure the local dataset and VLM checkpoint:
+Download the exact dataset and model revisions. The three artifacts require substantial disk space, so a shared cluster cache or data volume is recommended:
 
 ```bash
-export DATASET_ROOT=/path/to/lerobot_dataset
-export DATASET_REPO_ID=local/my_dataset
-export VLM_CHECKPOINT_PATH=/path/to/Molmo2-ER
+export DATASET_REPO_ID=lerobot/libero
+export DATASET_REVISION=1595a93b43aa055e55c127a4f0b4a99bb8035447
+export DATASET_ROOT=/path/to/libero_lerobot_v3
+
+export CHECKPOINT_PATH=/path/to/checkpoints/MolmoAct2
+export VLM_CHECKPOINT_PATH=/path/to/checkpoints/Molmo2-ER
+
+lerobot/.venv/bin/hf download "${DATASET_REPO_ID}" \
+  --repo-type dataset \
+  --revision "${DATASET_REVISION}" \
+  --local-dir "${DATASET_ROOT}"
+
+lerobot/.venv/bin/hf download allenai/MolmoAct2 \
+  --revision e432d85f6e039edca44afb93c262f3084ab72a9c \
+  --local-dir "${CHECKPOINT_PATH}"
+
+lerobot/.venv/bin/hf download allenai/Molmo2-ER \
+  --revision dab22564403d2607855bb1fffb0721285b445081 \
+  --local-dir "${VLM_CHECKPOINT_PATH}"
 ```
 
 Run the stages in the following order:
@@ -339,6 +359,20 @@ bash scripts/libero_goal_prior_v3/train_stage1.sh
 # 3. Visual Stage 2: initialized only from the v3 Stage-1 010000 checkpoint.
 #    8 GPUs, 30k steps, batch size 32/GPU by default.
 bash scripts/libero_goal_prior_v3/train_stage2.sh
+```
+
+Evaluate a Stage-2 checkpoint on the four standard LIBERO suites. One GPU runs the suites sequentially; providing four GPU IDs runs one suite per GPU:
+
+```bash
+# Sequential evaluation on one GPU.
+EVAL_GPU_IDS="0" \
+bash scripts/libero_eval/eval_libero_v3_checkpoint.sh \
+  lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2/checkpoints/020000/pretrained_model
+
+# Or evaluate the four suites in parallel.
+EVAL_GPU_IDS="0 1 2 3" \
+bash scripts/libero_eval/eval_libero_v3_checkpoint.sh \
+  lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2/checkpoints/020000/pretrained_model
 ```
 
 Default output layout:

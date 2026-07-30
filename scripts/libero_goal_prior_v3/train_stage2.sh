@@ -56,6 +56,7 @@ SCHEDULER_SEMANTIC_VISUAL_WARMUP_STEPS="${SCHEDULER_SEMANTIC_VISUAL_WARMUP_STEPS
 POSE_RECON_LOSS_WEIGHT="${POSE_RECON_LOSS_WEIGHT:-0.3}"
 
 DATASET_ROOT="${DATASET_ROOT:-/data2/JM/dataset/libero_lerobot_format}"
+export DATASET_REPO_ID="${DATASET_REPO_ID:-lerobot/libero}"
 STATS_JSON="${DATASET_ROOT}/meta/stats.json"
 STATS_NOTE="${DATASET_ROOT}/meta/stats.v3_recompute_note.json"
 STATS_OLD="${DATASET_ROOT}/meta/stats.pre_v3_bad_quantiles.json"
