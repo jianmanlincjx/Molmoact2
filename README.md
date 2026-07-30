@@ -415,20 +415,30 @@ bash scripts/libero_goal_prior_v3/train_stage2.sh
 
 The Stage-1 and Stage-2 scripts validate the LIBERO state-Z interval before training. Corrected statistics should have a q01/q99 interval on the order of `[0.04, 1.27]`, rather than the previous `[0.64, 0.88]`. Do not bypass this validation with `SKIP_STATS_CHECK=1` unless intentionally adapting the code to a different embodiment. For non-LIBERO data, replace the LIBERO-specific range check with a validation appropriate to the physical range of the new dataset rather than permanently disabling validation.
 
-### 6.5 Optional initialization for future study
+### 6.5 Optional MolmoAct2-Pretrain initialization
 
-A potentially useful extension is:
+A concrete alternative to the default Molmo2-ER initialization is:
 
-> **Generic MolmoAct2 robot-pretrained VLM weights with a randomly initialized Action Expert**
+> **[`allenai/MolmoAct2-Pretrain`](https://huggingface.co/allenai/MolmoAct2-Pretrain) backbone + a randomly initialized continuous Action Expert**
 
-This setting would preserve the requirement that the Action Prior does not inherit an existing motion policy, while potentially benefiting from robot-aware visual and language representations. It may improve sample efficiency or cross-scene generalization, but this hypothesis has not yet been evaluated. It is therefore neither the default v3 training configuration nor the initialization used for the reported v2b results, and should not be assumed to outperform Molmo2-ER.
+MolmoAct2-Pretrain adapts Molmo2-ER into a discrete autoregressive robot-policy backbone while retaining the Molmo2 token interface. It was released with `add_action_expert=false`, before the continuous flow-matching Action Expert is attached. It therefore provides robot-aware visual, language, and state representations without importing pretrained continuous Action-Expert parameters. This makes it a substantially cleaner candidate than extracting VLM tensors from a full MolmoAct2 checkpoint.
 
-The current `_load_vlm_bootstrap_weights` implementation rejects a full checkpoint containing `action_expert` tensors. Supporting this initialization requires either:
+The candidate checkpoint can be pinned and downloaded as follows:
 
-1. exporting a VLM-only checkpoint without Action Expert tensors; or
-2. modifying the bootstrap loader to explicitly skip Action Expert tensors and auditing that the Action Expert has been randomly reinitialized.
+```bash
+export VLM_CHECKPOINT_PATH=/path/to/checkpoints/MolmoAct2-Pretrain
 
-Do not initialize the VLM from a checkpoint fine-tuned on the target benchmark or target embodiment, as this may introduce data leakage or an unfair initialization advantage.
+lerobot/.venv/bin/hf download allenai/MolmoAct2-Pretrain \
+  --revision a05effca9ba36c1177359b42a9d5d7a4568dbe3c \
+  --local-dir "${VLM_CHECKPOINT_PATH}"
+
+VLM_CHECKPOINT_PATH="${VLM_CHECKPOINT_PATH}" \
+bash scripts/libero_goal_prior_v3/train_stage1.sh
+```
+
+The current `_load_vlm_bootstrap_weights` implementation rejects any source tensor whose name contains `action_expert`. Because MolmoAct2-Pretrain was constructed without that module, it is expected to satisfy this safety constraint while the continuous Action Expert is explicitly randomized and audited. Nevertheless, this initialization has not yet been smoke-tested end to end in the current repository; verify the bootstrap audit before launching a large-scale run.
+
+This setting should be reported as a separate initialization ablation rather than substituted silently for the default v3 recipe. Unlike Molmo2-ER, MolmoAct2-Pretrain has already received discrete robot-action pretraining, so any improvement may reflect robot-policy pretraining in addition to the proposed two-stage Action Prior. Do not use a checkpoint fine-tuned on LIBERO or the target embodiment, as that would introduce data leakage or an unfair initialization advantage.
 
 ## 7. Key Paths
 
