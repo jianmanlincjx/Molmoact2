@@ -1,254 +1,380 @@
-<div align="center">
-  <img src="assets/MolmoAct2.svg" alt="MolmoAct2 Logo" width="800" style="margin-left:'auto' margin-right:'auto' display:'block'"/>
-  <br>
-  <br>
-  <h1>MolmoAct2: Action Reasoning Models for Real-world Deployment</h1>
-</div>
+# Learning Visually Steerable Action Priors for Visual Generalization in Robot Manipulation
+
+> **Decoupling visual goal inference from goal-conditioned motion generation.**
+
+This document presents the research problem, the two-stage method, supporting LIBERO results, the v3 normalization correction, and the complete reproduction path. First-time readers may follow the sections sequentially; readers reproducing the method can proceed directly to Sections 5 and 6.
+
+**Quick navigation**
+
+<table>
+  <tr>
+    <td align="center"><a href="#1-background"><strong>Background</strong></a></td>
+    <td align="center"><a href="#2-motivation"><strong>Motivation</strong></a></td>
+    <td align="center"><a href="#3-method"><strong>Two-Stage Method</strong></a></td>
+    <td align="center"><a href="#4-libero-results"><strong>Results</strong></a></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="#5-current-v3-pipeline-corrected-quantile-statistics"><strong>v3 &amp; Normalization</strong></a></td>
+    <td align="center"><a href="#6-reproducing-the-method"><strong>Reproduction</strong></a></td>
+    <td align="center"><a href="#7-key-paths"><strong>Key Paths</strong></a></td>
+    <td align="center"><a href="README_GOAL_POSE_PRIOR.md"><strong>中文版</strong></a></td>
+  </tr>
+</table>
+
+This project first learns a vision-independent action prior conditioned on a target pose, and subsequently learns to aggregate from visual context the steering condition required to invoke that prior. The recommended training pipeline is **v3**, which retains the v2b architecture while retraining both stages with corrected state/action quantile statistics.
+
+## 1. Background
+
+Prior analysis suggests that zero-shot out-of-distribution (OOD) failures in vision-language-action models do not necessarily originate from a loss of perceptual competence. The VLM may still interpret the instruction, recognize relevant objects, and localize task-relevant regions, while the Action Expert continues to query this information. Nevertheless, the model can fail to translate the available multimodal evidence into accurate and executable trajectories.
+
+The VLM and the Action Expert acquire their capabilities from fundamentally different sources:
+
+| Component | Source of capability | Potential limitation |
+| --- | --- | --- |
+| VLM | Large-scale vision-language pretraining | Typically provides transferable perception across objects, appearances, and scenes |
+| Action Expert | Trained from scratch on a comparatively limited set of robot demonstrations | Can acquire dataset-specific visual–trajectory associations |
+
+When the Action Expert is fully conditioned on vision from the beginning of training, visual features not only specify the intended spatial goal but also participate in shaping the trajectory-generation process. Consequently, motion generation may become coupled to the appearances, camera configurations, and spatial layouts observed in the robot training distribution.
+
+## 2. Motivation
+
+**Research Question.** How can we learn an action prior that captures reusable motion structure without being tied to the visual distribution of the training environments, while remaining effectively steerable by the spatial goal in the current scene?
+
+**Key Idea.** We first learn a visual-free, target-pose-conditioned Action Prior that models how to move toward a specified goal, and then learn to infer from visual context the condition required to steer this prior.
+
+This formulation separates **goal-conditioned motion generation** from **visual goal inference**. Vision is primarily responsible for recovering the spatial goal and relevant scene constraints, whereas the Action Prior is responsible for generating the corresponding motion. In the current implementation, the inferred **Visual Steering Condition** comprises pose tokens together with complementary context tokens, and therefore generalizes rather than merely replicates the explicit target-pose condition used in Stage 1.
+
+## 3. Method
+
+### 3.1 Core mechanism
+
+The two stages are sequential rather than parallel. Stage 1 first learns a pose-conditioned Action Prior from explicit target poses. Stage 2 is then initialized from the Stage-1 checkpoint and learns to use visual context to steer that prior. The Action Prior remains trainable during Stage 2; initialization transfers the learned motion-generation capability rather than freezing it.
 
 <p align="center">
-  <a href="https://github.com/allenai/molmoact2/blob/main/LICENSE">
-    <img alt="GitHub License" src="https://img.shields.io/github/license/allenai/molmoact2">
-  </a>
-  <a href="https://allenai.org/blog/molmoact2">
-    <img alt="Blog Post" src="https://img.shields.io/badge/Blog-Post-F0529C">
-  </a>
-  <a href="https://arxiv.org/abs/2605.02881">
-    <img alt="Paper URL" src="https://img.shields.io/badge/arXiv-2605.02881-red?logo=arxiv">
-  </a>
-  <a href="https://huggingface.co/collections/allenai/molmoact2-models-69f81e05242e2499606b1be6">
-    <img alt="Base Models" src="https://img.shields.io/badge/HF-Base%20Models-yellow?logo=huggingface">
-  </a>
-  <a href="https://huggingface.co/collections/allenai/molmoact2-finetuned-models-69f81e23d5a7b34fde34f2ce">
-    <img alt="Finetuned Models" src="https://img.shields.io/badge/HF-Finetuned%20Models-yellow?logo=huggingface">
-  </a>
-  <a href="https://huggingface.co/collections/allenai/molmoact2-bimanualyam-dataset-69f81e17b140ec34f430a35e">
-    <img alt="MolmoAct2-BimanualYAM Dataset" src="https://img.shields.io/badge/HF-MolmoAct2--BimanualYAM%20Dataset-yellow?logo=huggingface">
-  </a>
-  <a href="https://huggingface.co/collections/allenai/molmoact2-datasets-69f81e316ec3daafe3f9555c">
-    <img alt="Robotics Datasets" src="https://img.shields.io/badge/HF-Robotics%20Datasets-yellow?logo=huggingface">
-  </a>
-  <a href="https://huggingface.co/collections/allenai/molmo2-er-datasets-69f8d605d92d46a5fc24ced2">
-    <img alt="ER Datasets" src="https://img.shields.io/badge/HF-ER%20Datasets-yellow?logo=huggingface">
-  </a>
-  <a href="https://molmospaces.allen.ai/leaderboard">
-    <img alt="1st VLA on MolmoSpace" src="https://img.shields.io/badge/MolmoSpace-1st%20VLA-success?logo=trophy&logoColor=gold">
-  </a>
+  <img src="./core_mechanism.png" alt="Core mechanism: Stage 1 learns the Action Prior and Stage 2 learns to steer it" width="95%">
 </p>
 
-MolmoAct2 is Ai2's open family of action reasoning models for robot control and real-world deployment. It builds on the Molmo2-ER embodied-reasoning vision-language backbone, adds robot state and action modeling, and connects the VLM to a flow-matching continuous action expert for closed-loop manipulation. The release includes base checkpoints for continued training, fine-tuned robot policies for evaluation and deployment, and the datasets used to build MolmoAct2 and Molmo2-ER.
+The Visual Steering Condition is not merely a pose prediction. It is a structured conditioning representation used to invoke the Stage-1 prior:
 
----
-### Updates
-- **[2026/06/13]** 🔥 We have released pre-training and post-training code and full experimental details for MolmoAct2, get started [**Here**](https://github.com/allenai/molmoact2/tree/main/experiments).
-- **[2026/06/10]** 🔥 We have setup zero-shot evaluation for MolmoAct2 (DROID and Bimanual YAM) on Maniskill simulation, get started [**Here**](https://github.com/allenai/molmoact2/tree/main/sim_eval).
-- **[2026/05/28]** 🔥 MolmoAct2 has been fully integrated into Huggingface, LeRobot official repo at [**MolmoAct2**](https://huggingface.co/docs/lerobot/main/en/molmoact2).
-- **[2026/05/19]** 🔥 We've also released MolmoAct2-Cortex evaluation rollouts on YAM bimanual setups (useful for failure annotation and reward model training) at [**Policy Rollouts**](https://huggingface.co/collections/allenai/molmoact2-eval-rollouts).
-- **[2026/05/17]** 🔥 We have released FastAPI inference servers for MolmoAct2 using DROID and YAM setups at [**Inference Servers**](#5-inference-servers) (implemented by [Jie Wang](https://github.com/Everloom-129)).
-- **[2026/05/14]** 🔥 We have released MolmoAct2 lerobot workflow for fine-tuning and inference. [**Check it out**](https://github.com/allenai/lerobot/tree/molmoact2-policy). 
-- **[2025/05/06]** 🔥 Detail implementation and setup for Franka, SO-100/101, and bimanual YAM have been released at  [**Real-world Deployment**](#4-real-world-deployment).
-- **[2026/05/05] 🔥 [MolmoAct2]([https://huggingface.co/collections/allenai/molmoact-689697591a3936fba38174d7](https://allenai.org/blog/molmoact2))** has been released!
+- **Pose tokens** encode the explicit spatial goal.
+- **Context tokens** retain layout, free-space, obstacle, and other contextual information that cannot be fully represented by a terminal pose alone.
 
+### 3.2 Stage 1: learning a pose-conditioned Action Prior
 
-## 1. Models
+**Overview.** Stage 1 starts from a frozen Molmo2-ER VLM and a randomly initialized Action Expert. It disables visual input and uses the robot end-effector state at the future timestep `t + H` as an explicit target condition. The objective is to learn a reusable, target-pose-conditioned Action Prior that captures how to move toward a specified spatial goal without becoming coupled to the visual distribution of the training environments.
 
-### Base Models
+<p align="center">
+  <img src="./stage1_training.png" alt="Stage 1: Learning a Visual-Free Action Prior" width="90%">
+</p>
+<p align="center"><em>Stage 1 — Learning a visual-free, target-pose-conditioned Action Prior.</em></p>
 
-We provide base checkpoints at every training stage for continued MolmoAct2 training and robot fine-tuning. These are foundation checkpoints rather than one-size-fits-all deployment policies.
+**Training interface.** The policy receives language, the current robot state, and an explicit future target pose, but no image:
 
-| Model | Use Case | Description | Checkpoint Path |
-| --- | --- | --- | --- |
-| MolmoAct2 | Fine-tuning | Post-trained MolmoAct2 model with a continuous flow-matching action expert. Use as the default foundation checkpoint for adapting to a target robot embodiment or benchmark. | https://huggingface.co/allenai/MolmoAct2 |
-| MolmoAct2-Think | Fine-tuning | MolmoAct2 foundation checkpoint with depth-token reasoning. Use when downstream policies should reason over compact depth predictions before acting. | https://huggingface.co/allenai/MolmoAct2-Think |
-| MolmoAct2-Pretrain | Post-training | Pre-trained discrete autoregressive VLA backbone before the continuous action expert is attached. Intended for continuing MolmoAct2 training stages, not direct continuous-control inference. | https://huggingface.co/allenai/MolmoAct2-Pretrain |
-| Molmo2-ER | Pre-training | Embodied-reasoning VLM backbone used as the starting point for MolmoAct2 action models. | https://huggingface.co/allenai/Molmo2-ER |
+- `H = chunk_size = 10`;
+- the target state is eight-dimensional: `xyz(3) + axis-angle(3) + gripper(2)`;
+- `_GoalSE3Encoder` maps the target state to four goal tokens;
+- the frozen VLM provides the language/state/goal conditioning representations; and
+- the randomly initialized Action Expert learns to generate the corresponding action chunk.
 
-### Finetuned Models
+Formally, the goal-pose encoder and Action Prior define
 
-We also provide fine-tuned checkpoints for common robot platforms and benchmarks. These models are intended to run directly in their target setting, or to serve as a stronger starting point for closely related robots. As with any robot policy, performance depends on hardware, cameras, calibration, action conventions, and language/task distribution.
+$$
+z_g = E_{\text{pose}}(s_{t+H}), \qquad
+a_{t:t+H} \sim \pi_{\text{prior}}(a \mid l_t, s_t, z_g),
+$$
 
-| Model | Use Case | Description | Checkpoint Path |
-| --- | --- | --- | --- |
-| MolmoAct2-DROID | Inference / Fine-tuning | MolmoAct2 fine-tuned on the filtered DROID Franka mixture with absolute joint-pose control. Intended for DROID-style policy inference or further fine-tuning. | https://huggingface.co/allenai/MolmoAct2-DROID |
-| MolmoAct2-BimanualYAM | Inference / Fine-tuning | MolmoAct2 fine-tuned on the bimanual YAM mixture with absolute joint-pose control and annotated language instructions. | https://huggingface.co/allenai/MolmoAct2-BimanualYAM |
-| MolmoAct2-SO100_101 | Inference / Fine-tuning | MolmoAct2 fine-tuned on SO-100/SO-101 datasets with absolute joint-pose control and annotated language instructions. | https://huggingface.co/allenai/MolmoAct2-SO100_101 |
-| MolmoAct2-LIBERO | Inference / Fine-tuning | MolmoAct2 fine-tuned on the full LIBERO training mixture, combining Spatial, Object, Goal, and Long suites. | https://huggingface.co/allenai/MolmoAct2-LIBERO |
-| MolmoAct2-Think-LIBERO | Inference / Fine-tuning | MolmoAct2-Think fine-tuned on LIBERO with depth-and-action examples and adaptive depth reasoning. | https://huggingface.co/allenai/MolmoAct2-Think-LIBERO |
+and are trained using only the flow-matching objective:
 
-## 2. Datasets
+$$
+\mathcal{L}_{S1} = \mathcal{L}_{\text{flow}}.
+$$
 
-| Data | Description | Dataset Path |
-| --- | --- | --- |
-| MolmoAct2-BimanualYAM Dataset | Collection of bimanual YAM datasets and related resources used for MolmoAct2 bimanual training and evaluation. | https://huggingface.co/collections/allenai/molmoact2-bimanualyam-dataset-69f81e17b140ec34f430a35e |
-| MolmoAct2 Robotics Datasets | Robotics datasets for MolmoAct2 training and fine-tuning, including SO-100/SO-101, DROID, MolmoAct Dataset, BC-Z, Bridge, and RT-1. | https://huggingface.co/collections/allenai/molmoact2-datasets-69f81e316ec3daafe3f9555c |
-| Molmo2-ER Datasets | Embodied reasoning datasets used for Molmo2-ER and MolmoAct2 backbone training, including spatial, 3D, robotics, and visual reasoning data. | https://huggingface.co/collections/allenai/molmo2-er-datasets-69f8d605d92d46a5fc24ced2 |
+Because no image enters this stage, the learned prior cannot rely on a direct mapping from scene appearance to trajectory. The target pose specifies **where** to move, while the Action Expert learns **how** to realize that motion.
 
-Note that all of the robotics datasets for pre-training and post-training are in LeRobot v3.0 format, paired with extra language annotations.
+### 3.3 Stage 2: aggregating a Visual Steering Condition
 
-## 3. LeRobot Integration
+**Overview.** Stage 2 is initialized from the Stage-1 checkpoint and therefore inherits the Action Expert weights that encode the target-pose-conditioned motion prior. Because the future target pose is unavailable at inference time, Stage 2 introduces learnable tokens that aggregate the required spatial goal and complementary scene constraints from the current image-language-state context. Pose reconstruction grounds part of this representation in the same future target used in Stage 1, while the complete representation conditions the Action Expert for action generation. This aligns the two stages through shared target semantics and a shared Action Expert conditioning interface.
 
-MolmoAct2 is integrated into LeRobot as a policy implementation, so users can train, evaluate, and deploy MolmoAct2 with standard LeRobot datasets and workflows. This repository includes the LeRobot integration as a Git submodule at `lerobot/`, pinned to the branch [`allenai/lerobot:molmoact2-policy`](https://github.com/allenai/lerobot/tree/molmoact2-policy).
+<p align="center">
+  <img src="./stage2_training.png" alt="Stage 2: Visual Goal-Pose Token-Based Action Prior Steering" width="90%">
+</p>
+<p align="center"><em>Stage 2 — Inferring a Visual Steering Condition to steer the Stage-1 Action Prior.</em></p>
 
-For training, although all of our experiments start from the base checkpoint [`allenai/MolmoAct2`](https://huggingface.co/allenai/MolmoAct2), we recommend starting from the fine-tuned checkpoints listed in the [Finetuned Models](#finetuned-models) section above if your embodiment is similar to [Bimanual YAM](https://huggingface.co/allenai/MolmoAct2-BimanualYAM), [DROID Franka](https://huggingface.co/allenai/MolmoAct2-DROID), or [SO-100/SO-101](https://huggingface.co/allenai/MolmoAct2-SO100_101), as they can provide better initialization and downstream performance. For generic use, use the base checkpoint.
+**Latent steering interface.** Stage 2 introduces 100 learnable queries:
 
-After cloning this repository, initialize the submodule from the repo root:
+```text
+100 × 768 latent tokens
+├── 8 pose tokens
+└── 92 context tokens
+```
+
+The pose tokens represent the explicit spatial goal, while the context tokens retain information such as object layout, free space, obstacles, and other constraints that cannot be reduced to a terminal pose.
+
+**Recurrent attention mechanism.** The learnable tokens are updated recurrently across the 36 VLM layers. The layers are partitioned into six contiguous depth groups, with one set of aggregation parameters shared within each group. At every layer, attention is applied in the following order:
+
+```text
+Self-Attention
+    → Semantic Cross-Attention (language/state)
+    → Visual Cross-Attention (image patches)
+    → Synthetic K/V for the Action Expert
+```
+
+1. **Self-attention** first shares the information accumulated by the learnable tokens, allowing them to coordinate their roles and form a common representation of what should be queried next.
+2. **Semantic cross-attention** then conditions the queries on the language instruction and current robot state, grounding their information needs in the task objective and current configuration.
+3. **Visual cross-attention** finally retrieves the corresponding goal geometry and scene evidence from image patches under this semantic guidance.
+
+This semantic-before-visual ordering makes visual extraction task-directed: the tokens first establish what information is required and then query the visual representation for that evidence.
+
+**Conditioning and supervision.** All 100 tokens are projected into synthetic keys and values that condition the Stage-1-initialized Action Expert. Raw image tokens are blocked from directly entering the Action Expert. Only the first eight pose tokens are passed through a `LayerNorm + concatenation MLP` decoder to reconstruct the same future target state used as the explicit Stage-1 condition:
+
+$$
+\hat{s}_{t+H} = D(Z_{\text{pose}}).
+$$
+
+The reconstruction loss constrains the pose tokens to preserve target-pose semantics, while the flow-matching loss requires the complete steering representation to support effective action generation:
+
+$$
+\mathcal{L}_{S2}
+=
+\mathcal{L}_{\text{flow}}
++ 0.3\,\mathcal{L}_{\text{pose}}.
+$$
+
+The future target state is required only as a training signal. At deployment time, the policy generates the steering tokens solely from the current images, language instruction, and robot state.
+
+### 3.4 Alignment between the two stages
+
+The two stages are aligned in three complementary ways:
+
+1. **Parameter inheritance.** Stage 2 is initialized from the Stage-1 `010000` checkpoint, preserving the learned motion prior.
+2. **Conditioning-path alignment.** The pose-encoded tokens in Stage 1 and the learned tokens in Stage 2 both control the same Action Expert through token/KV conditioning pathways.
+3. **Target-semantic alignment.** The pose reconstruction objective requires the Stage-2 pose tokens to recover the same `s_{t+H}` used as the explicit condition in Stage 1.
+
+The flow-matching objective further ensures that the learned tokens do not merely reconstruct the pose; they must also provide an effective conditioning signal for action generation.
+
+Importantly, the current implementation aligns the **conditioning semantics and Action Expert interface**, rather than imposing an explicit token-wise latent alignment. There is no separate latent-level `L_align`: Stage 1 uses four goal tokens, whereas Stage 2 uses 100 pose/context tokens. In addition, Stage 2 jointly fine-tunes the Action Prior instead of freezing it.
+
+### 3.5 Restricted visual steering
+
+Stage 2 enables:
+
+```text
+mask_image_from_action_expert = true
+```
+
+Raw image tokens are therefore prevented from directly conditioning the Action Expert. Visual information must first pass through the VLM and learnable-token aggregator and be transformed into a restricted steering representation. This constraint prevents the model from re-establishing an unrestricted raw-image-to-action pathway.
+
+The proposed design addresses the research question through the following mechanism:
+
+- Stage 1 learns reusable goal-conditioned motion generation without visual input.
+- Stage 2 recovers from visual context the spatial goal and scene constraints required to invoke that prior.
+- Pose reconstruction preserves the target semantics of the steering condition.
+- The restricted pathway limits direct visual influence on motion generation.
+
+## 4. LIBERO Results
+
+The results below were obtained with the **v2b Stage-2 20k checkpoint**. v3 retains the same architecture but retrains it with corrected quantile statistics. Until v3 has been evaluated under the same protocol, the following results should not be attributed to v3.
+
+### 4.1 LIBERO in-distribution evaluation
+
+Each suite contains ten tasks, with 32 evaluation episodes per task. We compare our 20k checkpoint against the 30k baseline:
+
+| Suite | Baseline 30k | Ours 20k | Δ |
+| --- | ---: | ---: | ---: |
+| LIBERO-Spatial | 75.00% (240/320) | **89.38% (286/320)** | **+14.38 pp** |
+| LIBERO-Object | 84.38% (270/320) | **87.19% (279/320)** | **+2.81 pp** |
+| LIBERO-10 | 63.75% (204/320) | **73.12% (234/320)** | **+9.38 pp** |
+| LIBERO-Goal | 54.69% (175/320) | **80.31% (257/320)** | **+25.62 pp** |
+| **Overall** | **69.45% (889/1280)** | **82.50% (1056/1280)** | **+13.05 pp** |
+
+Per-task results are available in [`lerobot/outputs/libero_eval/v2b_10k_vs_20k_task_comparison.md`](lerobot/outputs/libero_eval/v2b_10k_vs_20k_task_comparison.md).
+
+### 4.2 LIBERO-Plus OOD evaluation
+
+We use the `base_category` protocol and exclude `Language Instructions`. For each `(base skill × category)` pair, two variants are sampled and evaluated for ten episodes each, yielding 480 tasks and 4,800 rollouts in total.
+
+| OOD category | Baseline 30k | Ours 20k | Δ |
+| --- | ---: | ---: | ---: |
+| Background Textures | 52.75% (422/800) | **56.62% (453/800)** | **+3.88 pp** |
+| Camera Viewpoints | 16.00% (128/800) | **21.62% (173/800)** | **+5.62 pp** |
+| Light Conditions | 56.25% (450/800) | **64.50% (516/800)** | **+8.25 pp** |
+| Objects Layout | 29.38% (235/800) | **45.00% (360/800)** | **+15.62 pp** |
+| Robot Initial States | 21.12% (169/800) | **28.75% (230/800)** | **+7.62 pp** |
+| Sensor Noise | 16.12% (129/800) | **24.25% (194/800)** | **+8.12 pp** |
+| **Overall** | **31.94% (1533/4800)** | **40.12% (1926/4800)** | **+8.18 pp** |
+
+Complete results are available in [`lerobot/outputs/libero_plus_eval/baseline_vs_ours_task_comparison.md`](lerobot/outputs/libero_plus_eval/baseline_vs_ours_task_comparison.md).
+
+The largest gains occur on LIBERO-Goal, LIBERO-Spatial, and the Objects Layout perturbation category. This pattern is consistent with the motivation for explicit spatial-goal aggregation, but should be interpreted as supporting evidence rather than a causal identification of the underlying mechanism.
+
+## 5. Current v3 Pipeline: Corrected Quantile Statistics
+
+v3 does not modify the v2b architecture or Stage-2 objective. It corrects the statistics for `observation.state` and `action` in `meta/stats.json`, then retrains both stages from the beginning.
+
+### 5.1 Why the correction is necessary
+
+Training uses **quantile normalization** based on q01/q99 rather than simple min-max normalization. In the previous LIBERO statistics, the q01/q99 interval for the state Z coordinate was approximately `[0.64, 0.88]`, whereas the actual end-effector height covered approximately `[0.04, 1.27]`. Consequently:
+
+- approximately 94% of Z targets were clipped to ±1;
+- the Stage-1 target-pose condition lost most of its height information;
+- the Stage-2 pose objective was trained against a distorted reconstruction target; and
+- most of the metric-scale 3D pose error after denormalization was concentrated in Z.
+
+After recomputation, the fraction of state Z values outside q01/q99 decreases from 93.9% to approximately 2%, while the fraction of action vectors with at least one out-of-range dimension decreases from approximately 71% to 8%.
+
+The required procedure is:
+
+```text
+Recompute state/action quantiles
+                ↓
+Retrain Stage 1 with the corrected statistics
+                ↓
+Initialize Stage 2 only from the new Stage-1 010000 checkpoint
+```
+
+Do not resume a v2b run after replacing the statistics, and do not mix a checkpoint with processor/statistics artifacts from a different normalization space.
+
+## 6. Reproducing the Method
+
+### 6.1 Initialization chain
+
+The default reproduction configuration uses **Molmo2-ER VLM weights and a randomly initialized Action Expert**:
+
+```mermaid
+flowchart LR
+  template["MolmoAct2 architecture template"] --> stage1["Stage 1"]
+  molmoER["Molmo2-ER VLM weights"] --> stage1
+  randomAE["Randomly initialized Action Expert"] --> stage1
+  stage1 --> stage1Ckpt["v3 Stage-1 checkpoint at 10k"]
+  stage1Ckpt --> stage2["Stage 2"]
+  newModules["Random learnable queries, aggregator and pose decoder"] --> stage2
+  stage2 --> finalCkpt["Goal-Pose Prior checkpoint"]
+```
+
+Specifically:
+
+- `CHECKPOINT_PATH=Checkpoint/MolmoAct2` provides the complete model template.
+- `VLM_CHECKPOINT_PATH=Checkpoint/Molmo2-ER` overlays the VLM weights.
+- `randomize_action_expert=true` explicitly reinitializes the Action Expert.
+- Stage 1 trains the Action Expert and the SE(3) encoder.
+- Stage 2 strictly loads the v3 Stage-1 `010000` checkpoint and randomly initializes the learnable queries, semantic-visual aggregator, and pose decoder.
+- Stage 2 jointly optimizes the relevant modules; it does not freeze the Stage-1 prior.
+
+### 6.2 LeRobot dataset contract
+
+The current training entry point consumes a local dataset in LeRobot format. At minimum, the dataset must provide:
+
+- image observations;
+- `observation.state`;
+- `action`;
+- task-language annotations;
+- `meta/stats.json`; and
+- access to the future `observation.state` at `t + chunk_size`.
+
+The current LIBERO implementation additionally assumes:
+
+- two image streams: `observation.images.image` and `observation.images.image2`;
+- a single Franka arm;
+- delta end-effector pose control;
+- `chunk_size=10`; and
+- the first six state dimensions represent `xyz + axis-angle`, followed by gripper dimensions.
+
+Other LeRobot-format datasets can reuse the two-stage method, but adapting to a new embodiment requires validating the image keys, state/action semantics, control mode, feature dimensions, and future-pose definition. Replacing the dataset path alone is insufficient.
+
+### 6.3 Quick start
+
+Prepare the code and training environment:
 
 ```bash
 git submodule update --init --recursive
 cd lerobot
+uv sync --extra training --extra molmoact2 --extra libero
+cd ..
 ```
 
-For training, evaluation, and deployment instructions, see the MolmoAct2 LeRobot documentation at [`docs/source/molmoact2.mdx`](https://github.com/allenai/lerobot/blob/molmoact2-policy/docs/source/molmoact2.mdx). To reproduce the original LIBERO benchmark results exactly with the v0.5.1 evaluation stack, use the pinned inference branch [`allenai/lerobot:molmoact2-hf-inference`](https://github.com/allenai/lerobot/tree/molmoact2-hf-inference) with instructions in [MolmoAct2 README](https://github.com/allenai/lerobot/tree/molmoact2-hf-inference#molmoact2).
-
-We also open-source the original MolmoAct2 experiment scripts under [`experiments/`](experiments/). These cover training and evaluation replication, depth annotation, Hugging Face checkpoint conversion, and fine-tuning on new LeRobot datasets. See [`experiments/README.md`](experiments/README.md) for setup and commands.
-
-## 4. Real-world Deployment
-
-> [!WARNING]
-> **Disclaimer:** Out-of-the-box deployment is intended for simple tasks within the training task distribution (e.g., Pick-and-Place, opening, closing and etc). Performance has only been empirically verified on the **SO-100** and **Franka DROID** embodiments. Results on other embodiments and tasks are not guaranteed.
-
-MolmoAct2 supports out-of-the-box deployment on three robot embodiments:
-
-- **SO-100**
-- **Bimanual YAMs**
-- **Franka DROID setup**
-
-### SO-100/101 Setup
-
-For the best performance, we recommend using an **SO-100 with the standard wrist configuration** and a **third-person camera**. Here is an open implementation by Irene Grace. [Code](https://github.com/irenegracekp/molmoact2-so101)
-
-### Bimanual YAM Setup
-
-For the best performance, please build your Bimanual YAM setup following the reference design below:
-
-![Bimanual YAM setup](assets/m.png)
-
-All required components can be purchased using this [Bimanual YAM parts list](https://docs.google.com/spreadsheets/d/10bg4XJoeIqnuOBLpUlkhJV6QEYn_oK5IZVm5C7_kdbo/edit?usp=sharing).
-
-Implementation code for setting up, data collection, and inference for Bimanual YAM is [here](https://github.com/williamtsai726/YAM)
-
-Standardize evaluation implementation for zero-shot by Cortex AI [here](https://gist.github.com/SuveenE/6bc2b822ac44807565729c2b0ebb1cb2)
-
-### Franka Setup
-
-For the Franka setup, we recommend following the official [DROID implementation](https://github.com/droid-dataset/droid) for best results.
-
-## 5. Inference Servers
-
-This repository ships two FastAPI inference servers under `examples/`, one per fine-tuned checkpoint. Each server exposes the same `/act` wire protocol — `json_numpy`-encoded request/response — but with an embodiment-specific schema (camera count, state dimension, normalisation tag).
-
-| Server | Checkpoint | Default port | State dim | Cameras |
-| --- | --- | --- | --- | --- |
-| [`examples/droid/host_server_droid.py`](examples/droid/host_server_droid.py) | [`allenai/MolmoAct2-DROID`](https://huggingface.co/allenai/MolmoAct2-DROID) | `8000` | `(8,) = [q1..q7, gripper]` | `external`, `wrist` |
-| [`examples/yam/host_server_yam.py`](examples/yam/host_server_yam.py) | [`allenai/MolmoAct2-BimanualYAM`](https://huggingface.co/allenai/MolmoAct2-BimanualYAM) | `8202` | `(14,)` (per-arm 7-D × 2 arms) | `top`, `left`, `right` (order matters) |
-
-### 1. Install [uv](https://docs.astral.sh/uv/)
+Configure the local dataset and VLM checkpoint:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-exec $SHELL          # reload PATH so the `uv` binary is picked up
-uv --version
+export DATASET_ROOT=/path/to/lerobot_dataset
+export DATASET_REPO_ID=local/my_dataset
+export VLM_CHECKPOINT_PATH=/path/to/Molmo2-ER
 ```
 
-### 2. Create the project environment
-
-The pinned dependencies (CUDA-12.1 PyTorch wheels, `transformers`, `fastapi`, `json-numpy`, …) live in `pyproject.toml`. From the repo root:
+Run the stages in the following order:
 
 ```bash
-uv sync                  # creates .venv/ and installs all deps
-uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-# expected: True NVIDIA RTX A6000
+# 1. Back up the old statistics and recompute state/action statistics from data/**/*.parquet.
+bash scripts/libero_goal_prior_v3/fix_stats.sh
+
+# 2. Vision-free Stage 1: 8 GPUs, 10k steps, batch size 128/GPU by default.
+bash scripts/libero_goal_prior_v3/train_stage1.sh
+
+# 3. Visual Stage 2: initialized only from the v3 Stage-1 010000 checkpoint.
+#    8 GPUs, 30k steps, batch size 32/GPU by default.
+bash scripts/libero_goal_prior_v3/train_stage2.sh
 ```
 
-`uv` reads `.python-version` (3.11) and downloads a matching interpreter if needed. Re-run `uv sync` after pulling new commits.
+Default output layout:
 
-### 3. Download the checkpoint (~22 GB each)
+```text
+lerobot/outputs/libero_goal_prior_v3/seed_1000/
+├── stage1/checkpoints/010000/pretrained_model
+└── stage2/checkpoints/{005000,010000,...}
+```
+
+Training scale can be overridden through environment variables:
 
 ```bash
-export HF_HUB_ENABLE_HF_TRANSFER=1                       # fast parallel download
-uv run hf download allenai/MolmoAct2-DROID               # for the DROID server
-uv run hf download allenai/MolmoAct2-BimanualYAM         # for the YAM server
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+BATCH_SIZE=16 \
+STEPS=30000 \
+OUTPUT_DIR=/path/to/output \
+bash scripts/libero_goal_prior_v3/train_stage2.sh
 ```
 
-To put the cache on a different disk, set `HF_HOME=/path/to/cache` before the download (and when starting the server).
-
-### 4. Start a server
+Stage-2 smoke test:
 
 ```bash
-# DROID (Franka)
-uv run python examples/droid/host_server_droid.py --host 0.0.0.0 --port 8000 --dtype bfloat16
-
-# Bimanual YAM
-uv run python examples/yam/host_server_yam.py --host 0.0.0.0 --port 8202 --dtype bfloat16
+CUDA_VISIBLE_DEVICES=0 \
+BATCH_SIZE=1 \
+STEPS=2 \
+SAVE_CHECKPOINT=false \
+OUTPUT_DIR=lerobot/outputs/libero_goal_prior_v3/smoke \
+bash scripts/libero_goal_prior_v3/train_stage2.sh
 ```
 
-Useful flags (both servers):
+### 6.4 Normalization validation
 
-- `--dtype bfloat16|float16|float32` — default `bfloat16`. The DROID model card uses `float32` (~88 GB), which only fits on ~96 GB of free VRAM. The YAM model card reports `float32` at ~26 GB (fits on a single A6000), `bfloat16` under 16 GB. `bfloat16` is the safe default for both.
-- `--device cuda:0`
-- `--cuda-graph` — enables CUDA-graph capture for the action expert (~2× faster per call, ~2 GB extra VRAM). Disabled by default so the server coexists with other GPU workloads.
-- `--no-warmup` — skip the dummy forward pass at startup.
+`fix_stats.sh` performs the following operations:
 
-#### bf16 patches
+- backs up the previous `meta/stats.json`;
+- recomputes q01/q10/q50/q90/q99, min/max, mean, and standard deviation for `observation.state` and `action` directly from parquet;
+- leaves image statistics unchanged; and
+- writes `meta/stats.v3_recompute_note.json`.
 
-Loading in `bfloat16` is not officially supported by the upstream MolmoAct2 code; each server applies two idempotent patches to the cached `modeling_molmoact2.py` at startup:
+The Stage-1 and Stage-2 scripts validate the LIBERO state-Z interval before training. Corrected statistics should have a q01/q99 interval on the order of `[0.04, 1.27]`, rather than the previous `[0.64, 0.88]`. Do not bypass this validation with `SKIP_STATS_CHECK=1` unless intentionally adapting the code to a different embodiment. For non-LIBERO data, replace the LIBERO-specific range check with a validation appropriate to the physical range of the new dataset rather than permanently disabling validation.
 
-1. flow-matching trajectory uses the model dtype instead of hardcoded `float32` (otherwise the action expert errors with `mat1 and mat2 must have the same dtype`),
-2. `_to_array` casts to `float32` before `.numpy()` (numpy has no bf16 dtype).
+### 6.5 Optional initialization for future study
 
-Both are marked with `# patched_bf16_*` comments and re-applied on every server start, so re-downloading the checkpoint won't break things. Newer snapshot revisions (e.g. YAM) have already fixed both upstream; the server will log "needle not found" warnings, which are harmless.
+A potentially useful extension is:
 
-### 5. Reach it from the LAN
+> **Generic MolmoAct2 robot-pretrained VLM weights with a randomly initialized Action Expert**
 
-Bound to `0.0.0.0`, the server is reachable on every interface of this host. Health check:
+This setting would preserve the requirement that the Action Prior does not inherit an existing motion policy, while potentially benefiting from robot-aware visual and language representations. It may improve sample efficiency or cross-scene generalization, but this hypothesis has not yet been evaluated. It is therefore neither the default v3 training configuration nor the initialization used for the reported v2b results, and should not be assumed to outperform Molmo2-ER.
 
-```bash
-curl http://<lan-ip>:8000/act
-# DROID: {"status":"ok","repo_id":"allenai/MolmoAct2-DROID","norm_tag":"franka_droid",...}
+The current `_load_vlm_bootstrap_weights` implementation rejects a full checkpoint containing `action_expert` tensors. Supporting this initialization requires either:
 
-curl http://<lan-ip>:8202/act
-# YAM:   {"status":"ok","repo_id":"allenai/MolmoAct2-BimanualYAM","norm_tag":"yam_dual_molmoact2","num_cameras":3,"state_dim":14,...}
-```
+1. exporting a VLM-only checkpoint without Action Expert tensors; or
+2. modifying the bootstrap loader to explicitly skip Action Expert tensors and auditing that the Action Expert has been randomly reinitialized.
 
-The wire format (`json_numpy`-encoded request) is documented in the docstring at the top of each server file. The DROID server expects `external_cam`, `wrist_cam`, `instruction`, `state`; the YAM server expects `top_cam`, `left_cam`, `right_cam`, `instruction`, `state`. Both return `actions` (`(N, D)` float32) and `dt_ms`.
+Do not initialize the VLM from a checkpoint fine-tuned on the target benchmark or target embodiment, as this may introduce data leakage or an unfair initialization advantage.
 
-### Firewall / port
+## 7. Key Paths
 
-If clients on the LAN can't connect, open the port locally:
-
-```bash
-sudo ufw allow from <subnet> to any port 8000 proto tcp   # DROID
-sudo ufw allow from <subnet> to any port 8202 proto tcp   # YAM
-```
-
-## 6. Pre-training and Post-training
-
-[Full code](https://github.com/allenai/molmoact2/tree/main/experiments)
-
-## 7. License
-
-This model is licensed under Apache 2.0. It is intended for research and educational use in accordance with Ai2's [Responsible Use Guidelines](https://allenai.org/responsible-use).
-
-## 8. Model and Hardware Safety
-MolmoAct2 generate robot actions from visual observations and language instructions, but their behavior may vary across embodiments, environments, and hardware configurations. Users should carefully validate model outputs before deployment, especially when operating physical robots or other actuated systems. Where possible, actions should be monitored through interpretable intermediate outputs (adaptive depth map), simulation rollouts, action limits, or other safety checks before execution on hardware. The model’s action space should be bounded by the training data, robot controller limits, and task-specific safety constraints, including limits on speed, workspace, torque, and contact force. Users should follow the hardware manufacturer’s safety guidelines, use appropriate emergency-stop mechanisms, and operate the system only in a safely configured environment with human supervision.
-
-## 9. Contacts
-
-For questions, collaborations, or support, please contact with:
-```
-{hqfang,duanj1}@cs.washington.edu 
-```
-Found a bug or have a feature request? Please open a GitHub issue.
-
-## 10. Citation
-
-```bibtex
-@misc{fang2026molmoact2actionreasoningmodels,
-      title={MolmoAct2: Action Reasoning Models for Real-world Deployment}, 
-      author={Haoquan Fang and Jiafei Duan and Donovan Clay and Sam Wang and Shuo Liu and Weikai Huang and Xiang Fan and Wei-Chuan Tsai and Shirui Chen and Yi Ru Wang and Shanli Xing and Jaemin Cho and Jae Sung Park and Ainaz Eftekhar and Peter Sushko and Karen Farley and Angad Wadhwa and Cole Harrison and Winson Han and Ying-Chun Lee and Eli VanderBilt and Rose Hendrix and Suveen Ellawela and Lucas Ngoo and Joyce Chai and Zhongzheng Ren and Ali Farhadi and Dieter Fox and Ranjay Krishna},
-      year={2026},
-      eprint={2605.02881},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO},
-      url={https://arxiv.org/abs/2605.02881}, 
-}
-```
+| Path | Purpose |
+| --- | --- |
+| [`scripts/libero_goal_prior_v3/`](scripts/libero_goal_prior_v3/) | v3 statistics correction and Stage-1/Stage-2 entry points |
+| [`scripts/train_libero_molmoact2.sh`](scripts/train_libero_molmoact2.sh) | LeRobot training launcher |
+| [`lerobot/src/lerobot/policies/molmoact2/`](lerobot/src/lerobot/policies/molmoact2/) | Policy, configuration, and processor implementation |
+| [`EXPERIMENTS.md`](EXPERIMENTS.md) | Version and experiment log |
+| [`scripts/libero_goal_prior/viz_goal_pose.py`](scripts/libero_goal_prior/viz_goal_pose.py) | Ground-truth/predicted pose and rollout visualization |
