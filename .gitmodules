@@ -1,7 +1,7 @@
 [submodule "lerobot"]
 	path = lerobot
-	url = git@github.com:jianmanlincjx/lerobot.git
-	branch = molmoact2-policy
+	url = https://github.com/jianmanlincjx/lerobot.git
+	branch = feat/goal-pose-prior-v3
 [submodule "YAM"]
 	path = YAM
 	url = https://github.com/Everloom-129/YAM.git

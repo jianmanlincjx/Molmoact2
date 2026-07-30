@@ -283,10 +283,37 @@ Other LeRobot-format datasets can reuse the two-stage method, but adapting to a 
 
 ### 6.3 Quick start
 
-Prepare the code and training environment:
+Clone the v3 branch and pin the exact code snapshot used by this document:
 
 ```bash
-git submodule update --init --recursive
+git clone --branch feat/goal-pose-prior-v3 \
+  https://github.com/jianmanlincjx/Molmoact2.git
+cd Molmoact2
+
+# Pin the immutable v3 snapshot. The tag records the matching LeRobot revision.
+git checkout goal-pose-prior-v3-20260730
+git submodule sync -- lerobot
+git submodule update --init --recursive lerobot
+
+# Expected revisions:
+git describe --tags --exact-match
+# goal-pose-prior-v3-20260730
+git -C lerobot rev-parse --short HEAD
+# b3a70086
+```
+
+For an existing clone, replace the `git clone` step with:
+
+```bash
+git fetch origin feat/goal-pose-prior-v3 --tags
+git checkout goal-pose-prior-v3-20260730
+git submodule sync -- lerobot
+git submodule update --init --recursive lerobot
+```
+
+Create the training environment:
+
+```bash
 cd lerobot
 uv sync --extra training --extra molmoact2 --extra libero
 cd ..
