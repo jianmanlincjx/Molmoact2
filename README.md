@@ -17,7 +17,7 @@ This document presents the research problem, the two-stage method, supporting LI
     <td align="center"><a href="#5-current-v3-pipeline-corrected-quantile-statistics"><strong>v3 &amp; Normalization</strong></a></td>
     <td align="center"><a href="#6-reproducing-the-method"><strong>Reproduction</strong></a></td>
     <td align="center"><a href="#7-key-paths"><strong>Key Paths</strong></a></td>
-    <td align="center"><a href="README_GOAL_POSE_PRIOR.md"><strong>中文版</strong></a></td>
+    <td align="center"><a href="EXPERIMENTS.md"><strong>Experiment Log</strong></a></td>
   </tr>
 </table>
 
@@ -78,16 +78,16 @@ The Visual Steering Condition is not merely a pose prediction. It is a structure
 
 Formally, the goal-pose encoder and Action Prior define
 
-$$
+```math
 z_g = E_{\text{pose}}(s_{t+H}), \qquad
-a_{t:t+H} \sim \pi_{\text{prior}}(a \mid l_t, s_t, z_g),
-$$
+a_{t:t+H} \sim \pi_{\text{prior}}(a \mid l_t, s_t, z_g)
+```
 
 and are trained using only the flow-matching objective:
 
-$$
-\mathcal{L}_{S1} = \mathcal{L}_{\text{flow}}.
-$$
+```math
+\mathcal{L}_{S1} = \mathcal{L}_{\text{flow}}
+```
 
 Because no image enters this stage, the learned prior cannot rely on a direct mapping from scene appearance to trajectory. The target pose specifies **where** to move, while the Action Expert learns **how** to realize that motion.
 
@@ -127,18 +127,18 @@ This semantic-before-visual ordering makes visual extraction task-directed: the 
 
 **Conditioning and supervision.** All 100 tokens are projected into synthetic keys and values that condition the Stage-1-initialized Action Expert. Raw image tokens are blocked from directly entering the Action Expert. Only the first eight pose tokens are passed through a `LayerNorm + concatenation MLP` decoder to reconstruct the same future target state used as the explicit Stage-1 condition:
 
-$$
-\hat{s}_{t+H} = D(Z_{\text{pose}}).
-$$
+```math
+\hat{s}_{t+H} = D(Z_{\text{pose}})
+```
 
 The reconstruction loss constrains the pose tokens to preserve target-pose semantics, while the flow-matching loss requires the complete steering representation to support effective action generation:
 
-$$
+```math
 \mathcal{L}_{S2}
 =
 \mathcal{L}_{\text{flow}}
-+ 0.3\,\mathcal{L}_{\text{pose}}.
-$$
++ 0.3\,\mathcal{L}_{\text{pose}}
+```
 
 The future target state is required only as a training signal. At deployment time, the policy generates the steering tokens solely from the current images, language instruction, and robot state.
 
