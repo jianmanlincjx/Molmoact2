@@ -255,13 +255,6 @@ DDP backward with three camera streams; `bs=24` completed 7-GPU DDP with about
 64.7 GB peak memory per GPU. These values remain overridable through
 `BATCH_SIZE`.
 
-Changing the GPU count requires changing the number of steps to preserve sample
-exposure. For **seven GPUs**, use approximately **58k Stage-1 steps** and
-**206k Stage-2 steps** to retain the same three-epoch/two-epoch targets. Pass
-`STEPS=58000` to Stage 1, then pass both `STAGE1_FORMAL_STEPS=58000` and
-`STEPS=206000` to Stage 2. Do not copy the eight-GPU step counts unchanged and
-describe them as the same training budget.
-
 `SMOKE_STEPS`, `SMOKE_BATCH_SIZE`, `SMOKE_NUM_WORKERS`, `SMOKE_SAVE_FREQ`,
 `SMOKE_LOG_FREQ`, and `SMOKE_SAVE_CHECKPOINT` override the smoke defaults.
 
