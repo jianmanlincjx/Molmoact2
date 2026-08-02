@@ -2,7 +2,7 @@
 
 > **Decoupling visual goal inference from goal-conditioned motion generation.**
 
-This document presents the research problem, the two-stage method, supporting LIBERO results, the v3 normalization correction, and the complete reproduction path. First-time readers may follow the sections sequentially; readers reproducing the method can proceed directly to Sections 5 and 6.
+This document presents the research problem, the two-stage method, supporting LIBERO results, the v3 normalization correction, and the LIBERO/DROID reproduction paths. First-time readers may follow the sections sequentially; readers reproducing the method can proceed directly to Sections 5–7.
 
 **Quick navigation**
 
@@ -16,8 +16,11 @@ This document presents the research problem, the two-stage method, supporting LI
   <tr>
     <td align="center"><a href="#5-current-v3-pipeline-corrected-quantile-statistics"><strong>v3 &amp; Normalization</strong></a></td>
     <td align="center"><a href="#6-reproducing-the-method"><strong>Reproduction</strong></a></td>
-    <td align="center"><a href="#7-key-paths"><strong>Key Paths</strong></a></td>
+    <td align="center"><a href="#7-droid-adaptation"><strong>DROID Adaptation</strong></a></td>
     <td align="center"><a href="EXPERIMENTS.md"><strong>Experiment Log</strong></a></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="#8-key-paths"><strong>Key Paths</strong></a></td>
   </tr>
 </table>
 
@@ -429,12 +432,117 @@ The current `_load_vlm_bootstrap_weights` implementation rejects any source tens
 
 This setting should be reported as a separate initialization ablation rather than substituted silently for the default v3 recipe. Unlike Molmo2-ER, MolmoAct2-Pretrain has already received discrete robot-action pretraining, so any improvement may reflect robot-policy pretraining in addition to the proposed two-stage Action Prior. Do not use a checkpoint fine-tuned on LIBERO or the target embodiment, as that would introduce data leakage or an unfair initialization advantage.
 
-## 7. Key Paths
+## 7. DROID Adaptation
+
+The DROID adaptation preserves the two-stage method while separating the policy state from the goal-pose target:
+
+- current state and action remain the official 8-D Franka joint representation;
+- the independent 7-D target is `observation.ee_pose = [xyz(3), axis-angle(3), gripper(1)]`;
+- the pose is derived from DROID's recorded `observation.state.cartesian_position` and `observation.state.gripper_position`, so no forward kinematics is required;
+- `chunk_size = target_pose_delta_index = 15` at 15 Hz; and
+- the three camera slots are `exterior_1_left`, `exterior_2_left`, and `wrist_left`.
+
+Use the pinned [`lerobot/droid_1.0.1`](https://huggingface.co/datasets/lerobot/droid_1.0.1) revision `0eabc778f959c54b8c5aa3626cc1128d2d2e54d4`. The preparation tool never rewrites videos: it appends `observation.ee_pose` to mirrored parquet files and symlinks the original video directory. Training anchors must belong to successful episodes, resolve to non-empty canonical task text, remain contiguous within one episode, and pass the pinned DROID/OpenPI non-idle segmentation.
+
+First build and verify a 100-episode smoke dataset:
+
+```bash
+lerobot/.venv/bin/python scripts/droid_goal_prior/prepare_dataset.py \
+  --source-root /data0/JM/dataset/droid_1.0.1 \
+  --output-root /data0/JM/dataset/droid_1.0.1_goal_pose_smoke_v3 \
+  --max-episodes 100
+
+lerobot/.venv/bin/python scripts/droid_goal_prior/prepare_dataset.py \
+  --source-root /data0/JM/dataset/droid_1.0.1 \
+  --output-root /data0/JM/dataset/droid_1.0.1_goal_pose_smoke_v3 \
+  --verify-only
+```
+
+Then omit `--max-episodes` to prepare the complete training view:
+
+```bash
+lerobot/.venv/bin/python scripts/droid_goal_prior/prepare_dataset.py \
+  --source-root /data0/JM/dataset/droid_1.0.1 \
+  --output-root /data0/JM/dataset/droid_1.0.1_goal_pose
+```
+
+The build is fail-closed and atomic. It records source/output hashes, exact filtering parameters, anchor identities, derived statistics, and completion metadata in `goal_pose_provenance.json` and `_SUCCESS.json`. An existing completed output is reused only when its configuration fingerprint matches; an incomplete or differently configured output is never overwritten.
+
+The complete prepared recipe contains **17,259,872 valid anchors from 74,546
+episodes**. Therefore, the formal schedule is based on DROID anchor exposure,
+not copied from the much smaller LIBERO training set.
+
+#### Smoke training
+
+Run **100 steps in each stage** on the 100-episode smoke view before a full
+launch. This verifies the complete pipeline but does not produce a meaningful
+policy:
+
+```bash
+DATASET_ROOT=/data0/JM/dataset/droid_1.0.1_goal_pose_smoke_v3 \
+SAMPLE_MANIFEST_PATH=/data0/JM/dataset/droid_1.0.1_goal_pose_smoke_v3/valid_anchor_indices.parquet \
+SMOKE_RUN=true \
+SMOKE_STEPS=100 \
+bash scripts/droid_goal_prior/train_stage1.sh
+
+DATASET_ROOT=/data0/JM/dataset/droid_1.0.1_goal_pose_smoke_v3 \
+SAMPLE_MANIFEST_PATH=/data0/JM/dataset/droid_1.0.1_goal_pose_smoke_v3/valid_anchor_indices.parquet \
+SMOKE_RUN=true \
+STAGE1_SMOKE_STEPS=100 \
+SMOKE_STEPS=100 \
+bash scripts/droid_goal_prior/train_stage2.sh
+```
+
+#### Formal training
+
+On eight 80 GB GPUs, use **50,000 Stage-1 steps with batch size 128 per GPU**
+and **180,000 Stage-2 steps with batch size 24 per GPU**. Stage 1 has a global
+batch of 1,024 and processes 51.2M anchors, approximately **2.97
+data-equivalent epochs**. This larger budget is appropriate because its
+continuous Action Expert is randomly initialized and Stage 1 is comparatively
+inexpensive. Stage 2 has a global batch of 192 and processes 34.56M anchors,
+approximately **2.00 epochs**. Stage-2 checkpoints are retained every 30k
+steps through 180k.
+
+Stage 1 uses `5e-5` for the Action Expert and goal encoder. Stage 2 uses
+`1e-5` for VLM/ViT/connector and `1e-4` for the Action Expert and
+semantic-visual modules, with AdamW, cosine decay, and gradient clipping. The
+component-wise Stage-2 scale follows the existing LIBERO v3 high-LR recipe and
+StarVLA; exact warmup and optimizer values are pinned in the
+[DROID reproduction guide](scripts/droid_goal_prior/README.md).
+
+This recommendation is bounded by OpenPI's public full-DROID recipe: 8 H100s,
+global batch 256, and 100k steps (25.6M samples, approximately one epoch) from
+pi0.5 initialization, versus 240k steps (61.44M samples, approximately three
+epochs) from PaliGemma initialization. Our Stage 2 inherits a DROID-trained
+action prior but not a DROID-adapted visual pathway, so two epochs are a
+reasonable middle point. The invariant comparison is
+`steps × batch_size_per_gpu × num_gpus`, not steps alone.
+
+```bash
+DATASET_ROOT=/data0/JM/dataset/droid_1.0.1_goal_pose \
+SAMPLE_MANIFEST_PATH=/data0/JM/dataset/droid_1.0.1_goal_pose/valid_anchor_indices.parquet \
+STEPS=50000 BATCH_SIZE=128 \
+bash scripts/droid_goal_prior/train_stage1.sh
+
+DATASET_ROOT=/data0/JM/dataset/droid_1.0.1_goal_pose \
+SAMPLE_MANIFEST_PATH=/data0/JM/dataset/droid_1.0.1_goal_pose/valid_anchor_indices.parquet \
+STAGE1_FORMAL_STEPS=50000 STEPS=180000 BATCH_SIZE=24 \
+bash scripts/droid_goal_prior/train_stage2.sh
+```
+
+For seven GPUs, use about **58k/206k steps** for Stage 1/Stage 2 to preserve the same sample exposure. Stage 1 bootstraps the VLM from pinned `Molmo2-ER`, explicitly randomizes the continuous Action Expert, disables visual input, and trains the pose-conditioned prior. Stage 2 initializes from the validated Stage-1 `050000` checkpoint and learns visual steering with the independent `observation.ee_pose` reconstruction target. Both launchers verify the provenance, manifest, feature dimensions, statistics, and checkpoint lineage before starting. Stage 2 additionally enforces an exact processor-stats lineage, a missing/unexpected-key allowlist, and an Action Expert fingerprint match. Stage-1 `bs=256` reduces throughput, while Stage-2 `bs=32` OOMs during DDP backward with three camera streams; the documented defaults are the verified cost-effective settings. `MolmoAct2-Pretrain` is reserved for a separately reported initialization ablation because it has already received discrete DROID robot-policy pretraining.
+
+See [`scripts/droid_goal_prior/README.md`](scripts/droid_goal_prior/README.md) for the complete data contract, filtering definition, artifacts, and launch options.
+
+## 8. Key Paths
 
 | Path | Purpose |
 | --- | --- |
 | [`scripts/libero_goal_prior_v3/`](scripts/libero_goal_prior_v3/) | v3 statistics correction and Stage-1/Stage-2 entry points |
 | [`scripts/train_libero_molmoact2.sh`](scripts/train_libero_molmoact2.sh) | LeRobot training launcher |
+| [`scripts/droid_goal_prior/`](scripts/droid_goal_prior/) | DROID data preparation, verification, and two-stage launchers |
+| [`scripts/train_droid_molmoact2.sh`](scripts/train_droid_molmoact2.sh) | Strict DROID training launcher |
 | [`lerobot/src/lerobot/policies/molmoact2/`](lerobot/src/lerobot/policies/molmoact2/) | Policy, configuration, and processor implementation |
 | [`EXPERIMENTS.md`](EXPERIMENTS.md) | Version and experiment log |
 | [`scripts/libero_goal_prior/viz_goal_pose.py`](scripts/libero_goal_prior/viz_goal_pose.py) | Ground-truth/predicted pose and rollout visualization |
