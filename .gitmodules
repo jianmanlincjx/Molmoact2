@@ -1,7 +1,7 @@
 [submodule "lerobot"]
 	path = lerobot
 	url = https://github.com/jianmanlincjx/lerobot.git
-	branch = feat/goal-pose-prior-v3
+	branch = feat/droid-goal-pose-prior
 [submodule "YAM"]
 	path = YAM
 	url = https://github.com/Everloom-129/YAM.git
