@@ -44,3 +44,49 @@
 - 输出：`lerobot/outputs/libero_goal_prior_v3/seed_1000/{stage1,stage2}`。
 - Stage2：**只**从 v3 Stage1 `010000` 初始化；启动时校验 NEW state Z 分位数（拒绝旧 clip stats）；无 legacy Stage1 回退。
 - 注意：本机原 v1 Stage1 目录已缺失；改 stats 后不要 resume v2b。
+
+---
+
+## v3-highLR — 高学习率 Stage2
+
+- 状态：**已完成 30k**；实际运行覆盖了原 canonical v3 Stage2 目录，因此该目录下各 checkpoint 均属于 high-LR recipe。
+- 动机：参考 StarVLA 从 VL backbone + 随机 Action Head 训练 LIBERO 时为 Action Head 使用 `1e-4`；检验当前 Stage2 的 `1e-5` 是否限制 Action Expert 与新聚合模块的适配速度和最终性能。
+- 初始化与数据：沿用 corrected QUANTILES，并严格从 v3 Stage1 `010000` 初始化；模型结构、损失、batch size 和 seed 均不变。
+- 学习率：VLM / ViT / connector 保持 `1e-5`；Action Expert 与 semantic-visual 模块提高至 `1e-4`。
+- 调度：Action Expert 与 semantic-visual warmup 提高至 5k；总步数与 decay 均为 30k。
+- 实际输出：`lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2`。
+- 解释边界：该实验用于寻找更强的 v3 训练 recipe，不与 canonical v3 混报；StarVLA 的架构与归一化不同，因此这里只参考优化尺度，不视为严格对齐。
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 \
+OUTPUT_DIR=/data2/JM/Code/molmoact2/lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2 \
+LOG_FILE=/data2/JM/Code/molmoact2/lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2.console.log \
+RESUME_MODE=fresh \
+STEPS=30000 \
+SCHEDULER_DECAY_STEPS=30000 \
+BATCH_SIZE=32 \
+SAVE_FREQ=5000 \
+OPTIMIZER_LR=1e-5 \
+OPTIMIZER_VIT_LR=1e-5 \
+OPTIMIZER_CONNECTOR_LR=1e-5 \
+OPTIMIZER_ACTION_EXPERT_LR=1e-4 \
+OPTIMIZER_SEMANTIC_VISUAL_LR=1e-4 \
+SCHEDULER_ACTION_EXPERT_WARMUP_STEPS=5000 \
+SCHEDULER_SEMANTIC_VISUAL_WARMUP_STEPS=5000 \
+bash scripts/libero_goal_prior_v3/train_stage2.sh
+```
+
+---
+
+## DROID Goal-Pose Prior 适配 — 后续计划
+
+- 状态：**待实现**；先在本地小规模打通数据、两阶段训练与推理，再交由协作者在完整 DROID 上运行。
+- 数据集：优先使用 Hugging Face [`lerobot/droid_1.0.1`](https://huggingface.co/datasets/lerobot/droid_1.0.1)（LeRobot v3.0，95,658 episodes、27,630,375 frames、15 FPS、三路相机，约 412 GB）；正式开始前与协作者固定同一 revision。
+- 本地调试：只选择约 10 个 episodes 下载相关 v3 shards；小子集统计量仅用于 smoke test，不用于正式训练。
+- 当前状态输入：保留 `observation.state = [joint_position(7), gripper(1)]`，与现有 MolmoAct2-DROID 接口一致。
+- 独立目标位姿：由数据集已有的 `observation.state.cartesian_position = [xyz, roll, pitch, yaw]` 与 `gripper_position` 生成 `observation.ee_pose = [xyz(3), axis-angle(3), gripper(1)]`，无需 FK；该 pose 对应 DROID wrist attachment site，而非夹爪尖端 TCP。
+- 最小代码改动：增加可配置的 `goal_pose_feature_key`；Stage1/Stage2 从未来 `observation.ee_pose` 读取 7D target；pose encoder/decoder 与 `observation.state` 维度解耦。8 pose tokens、92 context tokens、6-group aggregator 和 Action Expert 接口保持不变。
+- 时间跨度：第一版保持 `chunk_size=10`，在 15 FPS 下对应约 0.67 秒；流程稳定后再对比 15-step（约 1 秒）目标。
+- 归一化：在完整 train split 上分别重算 joint state、7D EE pose 和 action 的统计量；不得复用 LIBERO stats。检查每维 q01/q99、clip 比例、gripper 语义及 normalize→unnormalize round trip。
+- Smoke test：验证 future target 不跨 episode、RPY→axis-angle 转换正确、Stage1 可训练、Stage2 可从 Stage1 初始化、Stage2 推理不依赖 future pose，以及输出 action 与 DROID 真机控制格式一致。
+- 交付：核心模型/processor 修改提交到 `lerobot` 独立分支；DROID 数据准备、Stage1/Stage2 启动脚本和说明提交到主仓库，再由协作者执行全量统计与训练。

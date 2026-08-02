@@ -157,8 +157,7 @@ def format_rate(value: dict[str, Any] | None) -> str:
 
 
 def comparison_pairs(labels: list[str]) -> list[tuple[str, str]]:
-    del labels
-    return []
+    return list(zip(labels, labels[1:], strict=False))
 
 
 def render_html(payload: dict[str, Any], refresh_seconds: int) -> str:
