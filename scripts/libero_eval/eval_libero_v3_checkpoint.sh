@@ -21,8 +21,4 @@ export CHECKPOINT_LABEL="${CHECKPOINT_LABEL:-goal_prior_v3_${checkpoint_step}}"
 export MODEL_LABEL="${MODEL_LABEL:-goal_pose_prior_v3}"
 export EVAL_VARIANT="${EVAL_VARIANT:-v3}"
 
-# Keep simulator/Hugging Face caches inside this checkout by default. Override
-# LIBERO_RESOURCE_ROOT when a shared cache is preferred on a cluster.
-export LIBERO_RESOURCE_ROOT="${LIBERO_RESOURCE_ROOT:-${WS}}"
-
 exec bash "${WS}/scripts/libero_eval/eval_libero_v2b_checkpoint.sh" "${POLICY_PATH}"

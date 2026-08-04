@@ -372,9 +372,9 @@ EVAL_GPU_IDS="0" \
 bash scripts/libero_eval/eval_libero_v3_checkpoint.sh \
   lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2/checkpoints/020000/pretrained_model
 
-# Or evaluate the four suites in parallel.
+# Or evaluate one supplied checkpoint with one suite per GPU.
 EVAL_GPU_IDS="0 1 2 3" \
-bash scripts/libero_eval/eval_libero_v3_checkpoint.sh \
+bash scripts/libero_eval/eval_libero_v3_multigpu.sh \
   lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2/checkpoints/020000/pretrained_model
 ```
 

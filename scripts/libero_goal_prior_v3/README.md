@@ -4,6 +4,8 @@ v3 **不改训练代码 / 模型结构**，只修正数据集 `meta/stats.json` 
 `observation.state` 与 `action` 的 q01/q99（以及配套的 min/max/mean/std），
 再按 v2b 同配置重训 Stage2。
 
+**网络 / 信息流基线（改架构前必读）**：[ARCHITECTURE.md](ARCHITECTURE.md)
+
 复现使用 [`lerobot/libero`](https://huggingface.co/datasets/lerobot/libero)
 数据集的固定 revision
 [`1595a93b43aa055e55c127a4f0b4a99bb8035447`](https://huggingface.co/datasets/lerobot/libero/tree/1595a93b43aa055e55c127a4f0b4a99bb8035447)。
@@ -39,6 +41,7 @@ bash scripts/libero_goal_prior_v3/train_stage2.sh
 | Stage1 输出 | `lerobot/outputs/libero_goal_prior_v3/seed_1000/stage1` |
 | Stage2 初始化 | **仅** 上述 Stage1 `checkpoints/010000`（无 legacy / v2b 回退） |
 | Stage2 架构 | 100 tokens / 8 pose / 6-group / self-attn / pose weight 0.3 |
+| Stage2 优化 | VLM `1e-5`；AE + aggregator `1e-4`（wu 5k；与 025000 / StarVLA 对齐） |
 | Stage2 输出 | `lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2` |
 | state stats | 启动前校验 `stats.json` 的 Z q99≳1.0，拒绝旧 clip 分位数 |
 | GPU | 默认 0–7（8 卡）；Stage1 `bs128`/10k，Stage2 `bs32`/30k |

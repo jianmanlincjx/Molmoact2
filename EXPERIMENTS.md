@@ -9,7 +9,8 @@
 | --- | --- | --- | --- | --- | --- |
 | v1（4-token goal-pose） | `feat/goal-pose-prior` | `d288f5d` | `feat/goal-pose-prior` | `f888ad14` | 10k inference-fixed |
 | v2b（depth-grouped） | `feat/goal-pose-prior-v2` | `de781fa` | `feat/goal-pose-prior-v2` | `e13fe164` | in-dist 20k + plus 评测 |
-| 当前 v3（fix QUANTILES） | `feat/goal-pose-prior-v3` | `dbd5696` | `feat/goal-pose-prior-v3` | `b3a70086` | stats fixed → Stage2 |
+| v3（fix QUANTILES） | `feat/goal-pose-prior-v3` | `dbd5696` | `feat/goal-pose-prior-v3` | `b3a70086` | stats fixed → Stage2 |
+| 当前 v4（硬瓶颈 8/8） | `feat/libero-goal-prior-v4` | 待填 | `feat/libero-goal-prior-v4` | `56e5e36d` | pose-only AE KV |
 
 ---
 

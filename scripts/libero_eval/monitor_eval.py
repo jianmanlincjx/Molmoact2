@@ -30,6 +30,36 @@ def _metric(successes: list[bool]) -> dict[str, int | float]:
     }
 
 
+def _discover_live_eval_dirs(eval_root: Path) -> list[Path]:
+    """Support both legacy suite/ and sharded gpu_*/suite/ layouts."""
+    live_paths = sorted(eval_root.glob("*/live_eval.json"))
+    live_paths.extend(sorted(eval_root.glob("gpu_*/**/live_eval.json")))
+    # Deduplicate while preserving order.
+    seen: set[Path] = set()
+    dirs: list[Path] = []
+    for path in live_paths:
+        directory = path.parent
+        if directory in seen:
+            continue
+        seen.add(directory)
+        dirs.append(directory)
+    return dirs
+
+
+def _discover_process_status_paths(eval_root: Path) -> list[Path]:
+    paths = sorted(eval_root.glob("*/process_status.json"))
+    paths.extend(sorted(eval_root.glob("gpu_*/process_status.json")))
+    paths.extend(sorted(eval_root.glob("gpu_*/**/process_status.json")))
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
 def collect(eval_root: Path) -> dict[str, Any]:
     manifest = _load_json(eval_root / "task_manifest.json")
     metadata = {}
@@ -38,54 +68,90 @@ def collect(eval_root: Path) -> dict[str, Any]:
             (task["suite"], int(task["task_id"])): task for task in manifest.get("tasks", [])
         }
 
-    suites: dict[str, Any] = {}
+    suite_successes: dict[str, list[bool]] = defaultdict(list)
+    suite_completed: dict[str, int] = defaultdict(int)
+    suite_total: dict[str, int] = defaultdict(int)
+    suite_statuses: dict[str, list[str]] = defaultdict(list)
     all_successes: list[bool] = []
     by_category: dict[str, list[bool]] = defaultdict(list)
     by_difficulty: dict[str, list[bool]] = defaultdict(list)
-    completed_tasks = 0
-    total_tasks = 0
-    statuses: list[str] = []
 
-    suite_names = manifest.get("suites", []) if manifest else []
-    suite_names = sorted(
-        set(suite_names)
-        | {path.parent.name for path in eval_root.glob("*/live_eval.json")}
-        | {path.parent.name for path in eval_root.glob("*/process_status.json")}
-    )
-    for suite in suite_names:
-        suite_dir = eval_root / suite
+    if manifest:
+        for task in manifest.get("tasks", []):
+            suite_total[task["suite"]] += 1
+
+    for suite_dir in _discover_live_eval_dirs(eval_root):
         live = _load_json(suite_dir / "live_eval.json") or {}
         process = _load_json(suite_dir / "process_status.json") or {"status": "pending"}
         status = "final" if live.get("status") == "final" else process.get("status", "pending")
-        statuses.append(status)
 
-        suite_successes: list[bool] = []
-        for task in live.get("per_task", []):
+        # Prefer explicit suite name from live payload; fall back to directory name.
+        suite_name = None
+        per_task = live.get("per_task", [])
+        if per_task:
+            suite_name = str(per_task[0].get("task_group") or "")
+        if not suite_name or suite_name == "None":
+            suite_name = suite_dir.name
+            if suite_name.startswith("gpu_"):
+                continue
+
+        suite_statuses[suite_name].append(status)
+        local_successes: list[bool] = []
+        for task in per_task:
             successes = [bool(value) for value in task.get("metrics", {}).get("successes", [])]
-            suite_successes.extend(successes)
-            key = (task["task_group"], int(task["task_id"]))
+            local_successes.extend(successes)
+            key = (str(task.get("task_group") or suite_name), int(task["task_id"]))
             task_meta = metadata.get(key)
             if task_meta:
                 by_category[task_meta["category"]].extend(successes)
-                by_difficulty[str(task_meta["sampling_level"])].extend(successes)
+                difficulty = task_meta.get("difficulty_level", task_meta.get("sampling_level"))
+                by_difficulty[str(difficulty)].extend(successes)
 
-        all_successes.extend(suite_successes)
-        suite_completed = int(live.get("completed_tasks", 0))
-        suite_total = int(live.get("total_tasks", 0))
-        if not suite_total and manifest:
-            suite_total = sum(task["suite"] == suite for task in manifest["tasks"])
-        completed_tasks += suite_completed
-        total_tasks += suite_total
+        suite_successes[suite_name].extend(local_successes)
+        all_successes.extend(local_successes)
+        suite_completed[suite_name] += int(live.get("completed_tasks", len(per_task)))
+
+    # Also count unfinished/failed shard statuses for overall state.
+    process_statuses = [
+        (_load_json(path) or {}).get("status", "pending")
+        for path in _discover_process_status_paths(eval_root)
+    ]
+
+    suites: dict[str, Any] = {}
+    suite_names = sorted(
+        set((manifest or {}).get("suites", []))
+        | set(suite_successes)
+        | set(suite_total)
+    )
+    for suite in suite_names:
+        statuses = suite_statuses.get(suite, [])
+        if statuses and all(status == "final" for status in statuses):
+            status = "final"
+        elif any(status == "failed" for status in statuses):
+            status = "failed"
+        elif any(status == "running" for status in statuses):
+            status = "running"
+        else:
+            status = "pending"
         suites[suite] = {
             "status": status,
-            "completed_tasks": suite_completed,
-            "total_tasks": suite_total,
-            **_metric(suite_successes),
+            "completed_tasks": suite_completed.get(suite, 0),
+            "total_tasks": suite_total.get(suite, 0),
+            **_metric(suite_successes.get(suite, [])),
         }
 
+    completed_tasks = sum(suite_completed.values())
+    total_tasks = sum(suite_total.values()) if suite_total else completed_tasks
+
     overall_status = "running"
-    if statuses and all(status in {"final", "failed"} for status in statuses):
-        overall_status = "failed" if "failed" in statuses else "final"
+    relevant_statuses = process_statuses or [
+        payload["status"] for payload in suites.values()
+    ]
+    if relevant_statuses and all(status in {"final", "failed"} for status in relevant_statuses):
+        overall_status = "failed" if "failed" in relevant_statuses else "final"
+    elif not relevant_statuses and completed_tasks == 0:
+        overall_status = "pending"
+
     return {
         "status": overall_status,
         "completed_tasks": completed_tasks,
@@ -101,7 +167,7 @@ def collect(eval_root: Path) -> dict[str, Any]:
 def _format_row(name: str, payload: dict[str, Any]) -> str:
     return (
         f"{name:<24} {payload.get('status', ''):<9} "
-        f"tasks {payload.get('completed_tasks', '-'):>3}/{payload.get('total_tasks', '-'):<3} "
+        f"tasks {payload.get('completed_tasks', '-'):>4}/{payload.get('total_tasks', '-'):<4} "
         f"rollouts {payload['episodes']:>5}  "
         f"success {payload['successes']:>4}  acc {payload['pc_success']:6.2f}%"
     )

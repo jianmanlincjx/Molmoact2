@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Build a deterministic, language-free LIBERO-Plus evaluation manifest.
+"""Build a deterministic LIBERO-Plus evaluation manifest.
 
 Protocols:
-  - base_category (default): cover every base skill × perturbation category,
+  - full (default for public comparison): every task in task_classification.json,
+    including Language Instructions. Matches the official LIBERO-Plus paper setting
+    of evaluating the complete 10,030-task suite.
+  - base_category: cover every base skill × non-language perturbation category,
     sampling N variants per cell (prefer mid difficulty), then shuffle within suite.
-  - balanced: legacy suite × category × difficulty grid sampling.
+  - balanced: legacy suite × category × difficulty grid sampling (language excluded).
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from typing import Any
 
 
 SUITES = ("libero_object", "libero_10", "libero_goal", "libero_spatial")
-CATEGORIES = (
+NON_LANGUAGE_CATEGORIES = (
     "Background Textures",
     "Camera Viewpoints",
     "Light Conditions",
@@ -28,6 +31,8 @@ CATEGORIES = (
     "Robot Initial States",
     "Sensor Noise",
 )
+CATEGORIES = NON_LANGUAGE_CATEGORIES  # backward-compatible alias for subsample protocols
+ALL_CATEGORIES = NON_LANGUAGE_CATEGORIES + ("Language Instructions",)
 LEVELS = (1, 2, 3, 4, 5)
 LANGUAGE_CATEGORY = "Language Instructions"
 TARGET_DIFFICULTY = 3
@@ -166,6 +171,27 @@ def _pick_near_difficulty(
     return ordered[:count]
 
 
+def select_full(
+    data: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Official LIBERO-Plus protocol: every classified task, all 7 categories."""
+    selected: list[dict[str, Any]] = []
+    for suite in SUITES:
+        for entry in data[suite]:
+            category = entry["category"]
+            if category not in ALL_CATEGORIES:
+                raise ValueError(f"Unknown category in {suite}: {category}")
+            selected.append(
+                _record(
+                    suite,
+                    entry,
+                    sampling_level=int(entry.get("difficulty_level") or TARGET_DIFFICULTY),
+                    base_skill=base_skill_name(entry["name"]),
+                )
+            )
+    return selected
+
+
 def select_base_category(
     data: dict[str, list[dict[str, Any]]],
     *,
@@ -183,11 +209,11 @@ def select_base_category(
         buckets: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for entry in entries:
             base = base_skill_name(entry["name"])
-            if base in bases and entry["category"] in CATEGORIES:
+            if base in bases and entry["category"] in NON_LANGUAGE_CATEGORIES:
                 buckets[(base, entry["category"])].append(entry)
 
         for base_index, base in enumerate(bases):
-            for category_index, category in enumerate(CATEGORIES):
+            for category_index, category in enumerate(NON_LANGUAGE_CATEGORIES):
                 candidates = buckets[(base, category)]
                 if not candidates:
                     raise ValueError(f"No tasks for {suite}/{base}/{category}")
@@ -261,23 +287,41 @@ def write_manifest(
     protocol: str,
 ) -> None:
     data = load_classification(classification)
-    if protocol == "base_category":
+    if protocol == "full":
+        tasks = select_full(data)
+        expected = sum(len(data[suite]) for suite in SUITES)
+        phase = "full"
+        protocol_version = 4
+        excluded_categories: list[str] = []
+        included_categories = list(ALL_CATEGORIES)
+        if episodes_per_task != 1:
+            raise ValueError(
+                "Official full LIBERO-Plus protocol requires episodes_per_task=1 "
+                f"(got {episodes_per_task})."
+            )
+    elif protocol == "base_category":
         tasks = select_base_category(data, seed=seed, samples_per_cell=samples_per_cell)
-        expected = len(SUITES) * 10 * len(CATEGORIES) * samples_per_cell
+        expected = len(SUITES) * 10 * len(NON_LANGUAGE_CATEGORIES) * samples_per_cell
         phase = "base_category"
         protocol_version = 3
+        excluded_categories = [LANGUAGE_CATEGORY]
+        included_categories = list(NON_LANGUAGE_CATEGORIES)
     elif protocol == "balanced":
         tasks = select_balanced(data, seed=seed, samples_per_cell=samples_per_cell)
-        expected = len(SUITES) * len(CATEGORIES) * len(LEVELS) * samples_per_cell
+        expected = len(SUITES) * len(NON_LANGUAGE_CATEGORIES) * len(LEVELS) * samples_per_cell
         phase = "balanced"
         protocol_version = 2
+        excluded_categories = [LANGUAGE_CATEGORY]
+        included_categories = list(NON_LANGUAGE_CATEGORIES)
     else:
         raise ValueError(f"Unknown protocol: {protocol}")
 
     if len(tasks) != expected:
         raise ValueError(f"Expected {expected} tasks, selected {len(tasks)}")
-    if any(task["category"] == LANGUAGE_CATEGORY or "_language_" in task["name"] for task in tasks):
-        raise ValueError("Language-perturbed task leaked into the manifest")
+    if protocol != "full" and any(
+        task["category"] == LANGUAGE_CATEGORY or "_language_" in task["name"] for task in tasks
+    ):
+        raise ValueError("Language-perturbed task leaked into the subsampled manifest")
     # Deduplicate by task_id within suite (same variant should not appear twice).
     seen: set[tuple[str, int]] = set()
     unique: list[dict[str, Any]] = []
@@ -292,18 +336,27 @@ def write_manifest(
             f"Duplicate task_ids in selection: {len(tasks)} -> {len(unique)} unique"
         )
 
-    tasks = shuffle_within_suites(unique, seed=seed)
+    # Keep official full evaluation in classification order; only subsample protocols shuffle.
+    if protocol == "full":
+        tasks = unique
+        for eval_index, task in enumerate(tasks):
+            task["eval_order"] = eval_index
+        eval_order = "classification_order"
+    else:
+        tasks = shuffle_within_suites(unique, seed=seed)
+        eval_order = "shuffled_within_suite"
+
     manifest = {
         "protocol_version": protocol_version,
         "phase": phase,
         "selection_seed": seed,
         "rollout_seed": seed,
-        "eval_order": "shuffled_within_suite",
-        "samples_per_cell": samples_per_cell,
-        "target_difficulty": TARGET_DIFFICULTY,
+        "eval_order": eval_order,
+        "samples_per_cell": samples_per_cell if protocol != "full" else None,
+        "target_difficulty": TARGET_DIFFICULTY if protocol != "full" else None,
         "episodes_per_task": episodes_per_task,
-        "excluded_categories": [LANGUAGE_CATEGORY],
-        "included_categories": list(CATEGORIES),
+        "excluded_categories": excluded_categories,
+        "included_categories": included_categories,
         "suites": list(SUITES),
         "num_tasks": len(tasks),
         "num_rollouts": len(tasks) * episodes_per_task,
@@ -320,8 +373,7 @@ def write_manifest(
         f"[manifest] protocol={phase} tasks={len(tasks)} "
         f"rollouts={manifest['num_rollouts']} "
         f"suites={dict(Counter(task['suite'] for task in tasks))} "
-        f"bases/suite="
-        f"{ {suite: len({t['base_skill'] for t in tasks if t['suite']==suite}) for suite in SUITES} }"
+        f"categories={dict(Counter(task['category'] for task in tasks))}"
     )
     print(f"[manifest] wrote {output}")
 
@@ -332,11 +384,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--samples-per-cell", type=int, default=2)
-    parser.add_argument("--episodes-per-task", type=int, default=10)
+    parser.add_argument("--episodes-per-task", type=int, default=1)
     parser.add_argument(
         "--protocol",
-        choices=("base_category", "balanced"),
-        default="base_category",
+        choices=("full", "base_category", "balanced"),
+        default="full",
     )
     args = parser.parse_args()
     write_manifest(

@@ -1,5 +1,7 @@
 # Goal-Pose Prior v3 — 实现说明
 
+网络结构与信息流见 **[ARCHITECTURE.md](ARCHITECTURE.md)**（基线对照用）。下文只记相对 v2b 的落地差异。
+
 ## 变更范围
 
 | 组件 | 是否改动 |

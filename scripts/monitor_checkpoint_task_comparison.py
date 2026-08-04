@@ -156,13 +156,8 @@ def format_rate(value: dict[str, Any] | None) -> str:
     )
 
 
-def comparison_pairs(labels: list[str]) -> list[tuple[str, str]]:
-    return list(zip(labels, labels[1:], strict=False))
-
-
 def render_html(payload: dict[str, Any], refresh_seconds: int) -> str:
     labels = [checkpoint["label"] for checkpoint in payload["checkpoints"]]
-    pairs = comparison_pairs(labels)
     summaries = []
     for checkpoint in payload["checkpoints"]:
         complete = checkpoint["completed"]
@@ -177,10 +172,6 @@ def render_html(payload: dict[str, Any], refresh_seconds: int) -> str:
     header = "".join(
         f"<th>{escape(label)} success</th>" for label in labels
     )
-    delta_header = "".join(
-        f"<th>Δ {escape(right)} − {escape(left)}</th>"
-        for left, right in pairs
-    )
     body_rows = []
     for row in payload["rows"]:
         cells = []
@@ -189,27 +180,11 @@ def render_html(payload: dict[str, Any], refresh_seconds: int) -> str:
             status_class = "running" if value and value.get("status") == "running" else ""
             cells.append(f"<td class='{status_class}'>{escape(format_rate(value))}</td>")
 
-        delta_cells = []
-        for left_label, right_label in pairs:
-            left = row["checkpoints"].get(left_label)
-            right = row["checkpoints"].get(right_label)
-            if (
-                left
-                and right
-                and not left.get("is_lower_bound")
-                and not right.get("is_lower_bound")
-            ):
-                delta = right["pc_success"] - left["pc_success"]
-                delta_class = "positive" if delta > 0 else "negative" if delta < 0 else ""
-                delta_cells.append(f"<td class='{delta_class}'>{delta:+.2f} pp</td>")
-            else:
-                delta_cells.append("<td>—</td>")
         body_rows.append(
             "<tr>"
             f"<td>{escape(row['suite'])}</td>"
             f"<td>{row['task_id']}</td>"
             + "".join(cells)
-            + "".join(delta_cells)
             + "</tr>"
         )
 
@@ -235,8 +210,6 @@ def render_html(payload: dict[str, Any], refresh_seconds: int) -> str:
     thead {{ position: sticky; top: 0; background: #f5f5f5; }}
     tr:nth-child(even) {{ background: #fafafa; }}
     .running {{ color: #8a5a00; }}
-    .positive {{ color: #176b32; font-weight: 600; }}
-    .negative {{ color: #9b2c2c; font-weight: 600; }}
   </style>
 </head>
 <body>
@@ -244,7 +217,7 @@ def render_html(payload: dict[str, Any], refresh_seconds: int) -> str:
   <div class="caption">Updated {updated} · auto-refresh every {refresh_seconds}s · running rates are lower bounds</div>
   <div class="summaries">{''.join(summaries)}</div>
   <table>
-    <thead><tr><th>Suite</th><th>Task ID</th>{header}{delta_header}</tr></thead>
+    <thead><tr><th>Suite</th><th>Task ID</th>{header}</tr></thead>
     <tbody>{''.join(body_rows)}</tbody>
   </table>
 </body>
@@ -254,7 +227,6 @@ def render_html(payload: dict[str, Any], refresh_seconds: int) -> str:
 
 def render_markdown(payload: dict[str, Any]) -> str:
     labels = [checkpoint["label"] for checkpoint in payload["checkpoints"]]
-    pairs = comparison_pairs(labels)
     updated = datetime.fromtimestamp(payload["updated_at"]).strftime("%Y-%m-%d %H:%M:%S")
     lines = [
         "# LIBERO per-task checkpoint comparison",
@@ -272,7 +244,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
         )
 
     header = ["Suite", "Task ID", *[f"{label} success" for label in labels]]
-    header.extend(f"Δ {right} − {left}" for left, right in pairs)
     lines.extend(
         [
             "",
@@ -298,13 +269,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
                     f"{value['pc_success']:.2f}% "
                     f"({value['successes']}/{value['episodes']})"
                 )
-        for left_label, right_label in pairs:
-            left = row["checkpoints"].get(left_label)
-            right = row["checkpoints"].get(right_label)
-            if left and right and not left.get("is_lower_bound") and not right.get("is_lower_bound"):
-                cells.append(f"{right['pc_success'] - left['pc_success']:+.2f} pp")
-            else:
-                cells.append("—")
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
     return "\n".join(lines)
@@ -312,7 +276,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
 def write_csv(payload: dict[str, Any], path: Path) -> None:
     labels = [checkpoint["label"] for checkpoint in payload["checkpoints"]]
-    pairs = comparison_pairs(labels)
     fields = ["suite", "task_id"]
     for label in labels:
         fields.extend(
@@ -324,8 +287,6 @@ def write_csv(payload: dict[str, Any], path: Path) -> None:
                 f"{label}_is_lower_bound",
             ]
         )
-    fields.extend(f"delta_{right}_minus_{left}_pp" for left, right in pairs)
-
     temporary = path.with_name(f".{path.name}.tmp")
     path.parent.mkdir(parents=True, exist_ok=True)
     with temporary.open("w", newline="", encoding="utf-8") as stream:
@@ -341,13 +302,6 @@ def write_csv(payload: dict[str, Any], path: Path) -> None:
                 if value:
                     for field in ("status", "successes", "episodes", "pc_success", "is_lower_bound"):
                         output[f"{label}_{field}"] = value.get(field)
-            for left_label, right_label in pairs:
-                left = row["checkpoints"].get(left_label)
-                right = row["checkpoints"].get(right_label)
-                if left and right and not left.get("is_lower_bound") and not right.get("is_lower_bound"):
-                    output[f"delta_{right_label}_minus_{left_label}_pp"] = (
-                        right["pc_success"] - left["pc_success"]
-                    )
             writer.writerow(output)
     os.replace(temporary, path)
 
