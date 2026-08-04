@@ -79,6 +79,19 @@ bash scripts/libero_goal_prior_v3/train_stage2.sh
 
 ---
 
+
+## 当前 v4 — 硬瓶颈（8 pose-only）
+
+- 动机：v3 Stage2 软瓶颈（100 = 8 pose + 92 context）在 LIBERO-PRO swap / Task 上接近 0；假设 92 个无 L_pose 的 context token 仍把布局–轨迹捷径送进 AE。
+- 架构差分（相对 v3）：Stage1 `num_goal_tokens=8`；Stage2 `num_semantic_visual_tokens=num_semantic_visual_pose_tokens=8`（全部进 AE 且全部受 L_pose）；aggregator 顺序 / 6 groups / image→AE mask 不变。
+- 兼容：共享 `MolmoAct2` 默认仍为 100/8；仅 `scripts/libero_goal_prior_v4/` 显式传 `8/8`。
+- 优化超参：与 v3 `025000`（StarVLA 对齐）锁定——VLM `1e-5`；AE + aggregator `1e-4`（wu 5k）；30k / bs32 / pose_w 0.3。
+- 数据：复用 v3 修正后的 QUANTILES。
+- 输出：`lerobot/outputs/libero_goal_prior_v4/seed_1000/{stage1,stage2}`。
+- 入口：`scripts/libero_goal_prior_v4/train_stage{1,2}.sh`；评测 `scripts/libero_eval/eval_libero_v4_checkpoint.sh`。
+
+---
+
 ## DROID Goal-Pose Prior 适配 — 后续计划
 
 - 状态：**待实现**；先在本地小规模打通数据、两阶段训练与推理，再交由协作者在完整 DROID 上运行。
