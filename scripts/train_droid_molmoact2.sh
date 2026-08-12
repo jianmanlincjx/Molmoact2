@@ -256,11 +256,59 @@ fi
 source "${WS}/scripts/activate_train_env.sh"
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
-NUM_PROCESSES="$(awk -F',' '{print NF}' <<<"${CUDA_VISIBLE_DEVICES}")"
+NUM_PROCESSES_LOCAL="$(awk -F',' '{print NF}' <<<"${CUDA_VISIBLE_DEVICES}")"
+
+# Multi-node knobs. Defaults reproduce the previous single-node behavior
+# exactly (NUM_MACHINES=1 makes --machine_rank/--main_process_ip/--port
+# no-ops for accelerate). A multi-node launcher must set NUM_MACHINES>1 and
+# invoke this script once per node with a distinct MACHINE_RANK and the same
+# MAIN_PROCESS_IP/PORT.
+NUM_MACHINES="${NUM_MACHINES:-1}"
+MACHINE_RANK="${MACHINE_RANK:-0}"
+MAIN_PROCESS_IP="${MAIN_PROCESS_IP:-127.0.0.1}"
+MAIN_PROCESS_PORT="${MAIN_PROCESS_PORT:-29500}"
+NUM_PROCESSES="$((NUM_PROCESSES_LOCAL * NUM_MACHINES))"
+
+# Cap CPU thread pools. `accelerate launch` (unlike torchrun) does NOT set
+# OMP_NUM_THREADS, so torch defaults to half the machine's cores -- 64 here --
+# in EVERY rank process. At 8 ranks that is 512 OpenMP threads on the 96 cores
+# PBS actually grants, and OpenMP busy-waits at barriers, so the cores are
+# pegged spinning rather than doing work. Measured on job 556042: cpupercent
+# 8773 (~88 of 96 cores) while the pipeline produced only ~4.4 samples/s, which
+# a probe (556096) showed costs ~0.35 CPU-seconds each -- i.e. ~1.5 cores of
+# real work against ~88 burned. That starves the dataloader workers of CPU and
+# is why data_s stayed ~100s regardless of NUM_WORKERS. The LIBERO eval scripts
+# in this repo already pin these to 1 for the same reason.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+
+# MolmoAct2's auto-inferred sequence cap allots only 32 tokens to the task
+# string (MOLMOACT2_TASK_TOKEN_BUDGET), which is too small for DROID's language
+# annotations and makes training die mid-run with
+# "sequence length N exceeds max_sequence_length=768" -- a hard ValueError in
+# processor_molmoact2.py with no truncation or skip path. Measured over all
+# 49630 DROID task strings with the real tokenizer: median 10 tokens, p99 32,
+# **max 107**, and 454 (0.91%) exceed 32. With 3 cameras the inferred cap is
+# 588 image + 80 fixed + 8 state + 32 margin = 768, so the worst case needs
+# 815. 896 covers it with headroom and still catches genuinely runaway
+# sequences. Safe to raise: max_sequence_length appears nowhere in
+# modeling_molmoact2.py -- it is purely a processor-side guard, and text is
+# padded to the longest item per batch (padding=True), not to this value, so a
+# higher cap allocates nothing.
+# NOTE this is why runs died at exactly step 100 three times (555716, 556042,
+# 556109): SEED=1000 makes shuffling deterministic, so the same oversized
+# sample recurs at the same step. The NVLink/NCCL "peer GPU memory" error in
+# those logs was a downstream symptom of one rank dying, not a hardware fault.
+MAX_SEQUENCE_LENGTH="${MAX_SEQUENCE_LENGTH:-896}"
 
 POLICY_PATH="${POLICY_PATH:-}"
 VIDEO_BACKEND="${VIDEO_BACKEND:-pyav}"
 IMAGE_TRANSFORMS_ENABLE="${IMAGE_TRANSFORMS_ENABLE:-true}"
+# lerobot's default (1e-4s) is tight enough that float32 timestamp rounding
+# can push a query ~1e-4s from its nearest decoded frame and raise a fatal
+# FrameTimestampError. Stages that skip video decode (Stage1) never hit this;
+# Stage2 decodes every frame, so train_stage2.sh raises this to 0.001.
+TOLERANCE_S="${TOLERANCE_S:-1e-4}"
 
 JOB_NAME="${JOB_NAME:-molmoact2-droid}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
@@ -292,14 +340,25 @@ SCHEDULER_VIT_WARMUP_STEPS="${SCHEDULER_VIT_WARMUP_STEPS:-${SCHEDULER_WARMUP_STE
 SCHEDULER_CONNECTOR_WARMUP_STEPS="${SCHEDULER_CONNECTOR_WARMUP_STEPS:-${SCHEDULER_WARMUP_STEPS}}"
 SCHEDULER_ACTION_EXPERT_WARMUP_STEPS="${SCHEDULER_ACTION_EXPERT_WARMUP_STEPS:-500}"
 SCHEDULER_DECAY_STEPS="${SCHEDULER_DECAY_STEPS:-${STEPS}}"
-SCHEDULER_DECAY_LR="${SCHEDULER_DECAY_LR:-1e-6}"
+# Raised 1e-6 -> 1e-5 (2026-08-08) to stay proportional to the Stage2 base LRs,
+# which moved 1e-5 -> 1e-4 for full-model training.
+SCHEDULER_DECAY_LR="${SCHEDULER_DECAY_LR:-1e-5}"
 
 WANDB_ENABLE="${WANDB_ENABLE:-false}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-molmoact2-droid}"
+# Checkpoints already live on disk; uploading each one (multi-GB) as a wandb
+# artifact too is redundant and, since lerobot_train.py does not guard that
+# upload with a try/except, a network hiccup or storage quota there would
+# crash training. Default true to avoid that risk.
+WANDB_DISABLE_ARTIFACT="${WANDB_DISABLE_ARTIFACT:-true}"
 
 mkdir -p "$(dirname "${OUTPUT_DIR}")"
-LOG_FILE="${LOG_FILE:-${OUTPUT_DIR}.console.log}"
+if [[ "${NUM_MACHINES}" -gt 1 ]]; then
+  LOG_FILE="${LOG_FILE:-${OUTPUT_DIR}.console.rank${MACHINE_RANK}.log}"
+else
+  LOG_FILE="${LOG_FILE:-${OUTPUT_DIR}.console.log}"
+fi
 mkdir -p "$(dirname "${LOG_FILE}")"
 
 if [[ -z "${RESUME_CHECKPOINT}" && "${RESUME_MODE}" == "auto" ]]; then
@@ -328,13 +387,15 @@ if [[ -n "${RESUME_CHECKPOINT}" ]]; then
   fi
 fi
 
-echo "[droid] GPUs=${CUDA_VISIBLE_DEVICES} (n=${NUM_PROCESSES})"
+echo "[droid] GPUs=${CUDA_VISIBLE_DEVICES} (local=${NUM_PROCESSES_LOCAL} total=${NUM_PROCESSES})"
+echo "[droid] machines=${NUM_MACHINES} rank=${MACHINE_RANK} main=${MAIN_PROCESS_IP}:${MAIN_PROCESS_PORT}"
 echo "[droid] dataset=${DATASET_REPO_ID} root=${DATASET_ROOT}"
 echo "[droid] manifest=${SAMPLE_MANIFEST_PATH}"
 echo "[droid] policy_path=${POLICY_PATH:-<fresh>} checkpoint=${CHECKPOINT_PATH}@${CHECKPOINT_REVISION}"
 echo "[droid] output_dir=${OUTPUT_DIR}"
 echo "[droid] batch_size/gpu=${BATCH_SIZE} steps=${STEPS} seed=${SEED}"
 echo "[droid] action_mode=${ACTION_MODE} action_expert_only=${TRAIN_ACTION_EXPERT_ONLY} visual_disabled=${DISABLE_VISUAL_INPUT}"
+echo "[droid] tolerance_s=${TOLERANCE_S}"
 echo "[droid] AdamW betas=${OPTIMIZER_BETAS} eps=${OPTIMIZER_EPS} weight_decay=${OPTIMIZER_WEIGHT_DECAY} grad_clip=${OPTIMIZER_GRAD_CLIP_NORM}"
 echo "[droid] resume=${RESUME_CONFIG_PATH:-false}"
 
@@ -342,6 +403,10 @@ cd "${WS}/lerobot"
 CMD=(
   accelerate launch
   --num_processes="${NUM_PROCESSES}"
+  --num_machines="${NUM_MACHINES}"
+  --machine_rank="${MACHINE_RANK}"
+  --main_process_ip="${MAIN_PROCESS_IP}"
+  --main_process_port="${MAIN_PROCESS_PORT}"
   --mixed_precision=bf16
   -m lerobot.scripts.lerobot_train
 )
@@ -363,8 +428,10 @@ else
     --dataset.sample_indices_path="${SAMPLE_MANIFEST_PATH}"
     --dataset.video_backend="${VIDEO_BACKEND}"
     --dataset.image_transforms.enable="${IMAGE_TRANSFORMS_ENABLE}"
+    --tolerance_s="${TOLERANCE_S}"
     --policy.device=cuda
     --policy.action_mode="${ACTION_MODE}"
+    --policy.max_sequence_length="${MAX_SEQUENCE_LENGTH}"
     --policy.chunk_size=15
     --policy.n_action_steps=15
     --policy.setup_type="single franka robotic arm in droid"
@@ -421,6 +488,9 @@ else
     CMD+=(--wandb.enable=true --wandb.project="${WANDB_PROJECT}")
     if [[ -n "${WANDB_ENTITY}" ]]; then
       CMD+=(--wandb.entity="${WANDB_ENTITY}")
+    fi
+    if [[ "${WANDB_DISABLE_ARTIFACT}" == "true" ]]; then
+      CMD+=(--wandb.disable_artifact=true)
     fi
   else
     CMD+=(--wandb.enable=false)
