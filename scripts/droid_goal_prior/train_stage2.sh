@@ -47,11 +47,21 @@ export ACTION_MODE=continuous
 export TRAIN_ACTION_EXPERT_ONLY=false
 export DISABLE_VISUAL_INPUT=false
 export IMAGE_TRANSFORMS_ENABLE=true
+# Unlike Stage1 (disable_visual_input=true -> skip_video_decode, no video
+# reads at all), Stage2 decodes every frame. lerobot's default tolerance_s
+# (1e-4s) is tight enough that float32 timestamp rounding on DROID's ~15fps
+# grid can push a query just past it and raise a fatal FrameTimestampError
+# mid-training. 1ms is comfortably inside a frame period and absorbs the
+# rounding noise.
+export TOLERANCE_S="${TOLERANCE_S:-0.001}"
 
-export OPTIMIZER_LR="${OPTIMIZER_LR:-1e-5}"
-export OPTIMIZER_VIT_LR="${OPTIMIZER_VIT_LR:-1e-5}"
-export OPTIMIZER_CONNECTOR_LR="${OPTIMIZER_CONNECTOR_LR:-1e-5}"
-export OPTIMIZER_ACTION_EXPERT_LR="${OPTIMIZER_ACTION_EXPERT_LR:-1e-4}"
+# Stage2 is full-model training (not backbone fine-tuning), so these are set
+# from prior work rather than derived from the batch-size change. Raised
+# 2026-08-08 alongside BATCH_SIZE 64 -> 128 (global 512 -> 1024).
+export OPTIMIZER_LR="${OPTIMIZER_LR:-1e-4}"
+export OPTIMIZER_VIT_LR="${OPTIMIZER_VIT_LR:-1e-4}"
+export OPTIMIZER_CONNECTOR_LR="${OPTIMIZER_CONNECTOR_LR:-1e-4}"
+export OPTIMIZER_ACTION_EXPERT_LR="${OPTIMIZER_ACTION_EXPERT_LR:-3e-4}"
 export OPTIMIZER_BETAS="${OPTIMIZER_BETAS:-[0.9,0.95]}"
 export OPTIMIZER_EPS="${OPTIMIZER_EPS:-1e-6}"
 export OPTIMIZER_WEIGHT_DECAY="${OPTIMIZER_WEIGHT_DECAY:-0.0}"
@@ -70,7 +80,7 @@ SEMANTIC_VISUAL_FFN_RATIO="${SEMANTIC_VISUAL_FFN_RATIO:-4.0}"
 SEMANTIC_VISUAL_DROPOUT="${SEMANTIC_VISUAL_DROPOUT:-0.0}"
 SEMANTIC_VISUAL_ENABLE_SELF_ATTENTION="${SEMANTIC_VISUAL_ENABLE_SELF_ATTENTION:-true}"
 SEMANTIC_VISUAL_NUM_LAYER_GROUPS="${SEMANTIC_VISUAL_NUM_LAYER_GROUPS:-6}"
-OPTIMIZER_SEMANTIC_VISUAL_LR="${OPTIMIZER_SEMANTIC_VISUAL_LR:-1e-4}"
+OPTIMIZER_SEMANTIC_VISUAL_LR="${OPTIMIZER_SEMANTIC_VISUAL_LR:-3e-4}"
 SCHEDULER_SEMANTIC_VISUAL_WARMUP_STEPS="${SCHEDULER_SEMANTIC_VISUAL_WARMUP_STEPS:-5000}"
 POSE_RECON_LOSS_WEIGHT="${POSE_RECON_LOSS_WEIGHT:-0.3}"
 VALIDATE_STAGE1="${VALIDATE_STAGE1:-true}"
