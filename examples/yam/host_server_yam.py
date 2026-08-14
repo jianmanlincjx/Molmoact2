@@ -124,12 +124,24 @@ class Policy:
         device: str,
         dtype: torch.dtype,
         enable_cuda_graph: bool = False,
+        checkpoint_dir: str | None = None,
     ) -> None:
         self.default_cuda_graph = enable_cuda_graph
         # `predict_action` reads `norm_stats.json` from `config._name_or_path`.
-        # Always resolve to the local snapshot dir so that lookup works.
-        local_dir = snapshot_download(repo_id=repo_id)
-        log.info("Resolved snapshot dir: %s", local_dir)
+        # Always resolve to a local dir so that lookup works.
+        #
+        # `checkpoint_dir` skips `snapshot_download()` entirely in favor of an
+        # already-materialized local copy (e.g. `hf download <repo_id>
+        # --local-dir <dir>`, run from a node with internet access). Mirrors
+        # the DROID server's override: compute nodes here have no internet,
+        # and `snapshot_download()`'s cache-dir mechanism hangs on this
+        # project's /scratch filesystem regardless.
+        if checkpoint_dir is not None:
+            local_dir = checkpoint_dir
+            log.info("Using pre-supplied checkpoint dir: %s", local_dir)
+        else:
+            local_dir = snapshot_download(repo_id=repo_id)
+            log.info("Resolved snapshot dir: %s", local_dir)
 
         _patch_modeling_for_bf16(local_dir)
 
@@ -325,6 +337,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--host", default="0.0.0.0", help="bind address (default: 0.0.0.0)")
     p.add_argument("--port", type=int, default=8202, help="bind port (default: 8202)")
     p.add_argument("--repo-id", default=REPO_ID, help=f"HF repo id (default: {REPO_ID})")
+    p.add_argument(
+        "--checkpoint-dir",
+        default=None,
+        help="skip snapshot_download() and load directly from this local directory "
+             "(e.g. a prior `hf download <repo_id> --local-dir <dir>`)",
+    )
     p.add_argument("--device", default="cuda:0", help="torch device (default: cuda:0)")
     p.add_argument(
         "--dtype",
@@ -356,6 +374,7 @@ def main() -> None:
         device=args.device,
         dtype=dtype,
         enable_cuda_graph=args.cuda_graph,
+        checkpoint_dir=args.checkpoint_dir,
     )
     if not args.no_warmup:
         warmup(policy)

@@ -124,6 +124,7 @@ class Policy:
         device: str,
         dtype: torch.dtype,
         enable_cuda_graph: bool = False,
+        checkpoint_dir: str | None = None,
     ) -> None:
         self.default_cuda_graph = enable_cuda_graph
         # The MolmoAct2 model code reads `norm_stats.json` from
@@ -131,8 +132,23 @@ class Policy:
         # string, so `predict_action` fails at runtime. Resolve the local
         # snapshot dir up front and load from there — `snapshot_download` is a
         # no-op when files are cached.
-        local_dir = snapshot_download(repo_id=repo_id)
-        log.info("Resolved snapshot dir: %s", local_dir)
+        #
+        # `checkpoint_dir` lets a caller skip `snapshot_download()` entirely
+        # and point straight at an already-materialized local copy (e.g. one
+        # fetched via `hf download <repo_id> --local-dir <dir>`). This exists
+        # because `snapshot_download()`'s cache-dir mechanism uses `filelock`
+        # for download coordination, which has been observed to hang
+        # indefinitely on this project's `/scratch` filesystem (a parallel FS
+        # whose advisory-locking semantics don't behave like NFS/local disk)
+        # — it works fine writing to NFS home instead, but home's quota is far
+        # too small for a ~22GB checkpoint. `--local-dir` downloads don't hit
+        # this path, so a pre-fetched flat copy sidesteps the issue cleanly.
+        if checkpoint_dir is not None:
+            local_dir = checkpoint_dir
+            log.info("Using pre-supplied checkpoint dir: %s", local_dir)
+        else:
+            local_dir = snapshot_download(repo_id=repo_id)
+            log.info("Resolved snapshot dir: %s", local_dir)
 
         _patch_modeling_for_bf16(local_dir)
 
@@ -205,7 +221,7 @@ class Policy:
                 task=instruction,
                 state=state_f32,
                 norm_tag=NORM_TAG,
-                action_mode="continuous",
+                inference_action_mode="continuous",
                 enable_depth_reasoning=False,
                 num_steps=num_steps,
                 normalize_language=True,
@@ -324,6 +340,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--host", default="0.0.0.0", help="bind address (default: 0.0.0.0)")
     p.add_argument("--port", type=int, default=8000, help="bind port (default: 8000)")
     p.add_argument("--repo-id", default=REPO_ID, help=f"HF repo id (default: {REPO_ID})")
+    p.add_argument(
+        "--checkpoint-dir",
+        default=None,
+        help="skip snapshot_download() and load directly from this local directory "
+             "(e.g. a prior `hf download <repo_id> --local-dir <dir>`)",
+    )
     p.add_argument("--device", default="cuda:0", help="torch device (default: cuda:0)")
     p.add_argument(
         "--dtype",
@@ -356,6 +378,7 @@ def main() -> None:
         device=args.device,
         dtype=dtype,
         enable_cuda_graph=args.cuda_graph,
+        checkpoint_dir=args.checkpoint_dir,
     )
     if not args.no_warmup:
         warmup(policy)
