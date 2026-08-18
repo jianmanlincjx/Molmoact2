@@ -75,6 +75,19 @@ class FrankaDROID(BaseAgent):
                 near=0.1, far=100,
                 mount=self.robot.links_map["base"],
             ),
+            CameraConfig(
+                # Second DROID exterior ZED view, mirrored across the robot's
+                # sagittal (y=0) plane from "external_cam" -- used by the
+                # 3-camera goal-pose-prior checkpoint (exterior_1_left/
+                # exterior_2_left), which trains on two genuinely distinct
+                # stereo viewpoints rather than one duplicated view.
+                uid="exterior_2_left",
+                pose=sapien_utils.look_at(eye=[0.05, -0.57, 0.66], target=[0.63, 0.48, -0.42]),
+                width=640, height=360,
+                fov=2 * np.arctan(3.024 / (2 * 2.1)),
+                near=0.1, far=100,
+                mount=self.robot.links_map["base"],
+            ),
         ]
 
     @property

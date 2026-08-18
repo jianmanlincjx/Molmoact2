@@ -9,12 +9,25 @@ import torch
 
 @dataclass(frozen=True)
 class RemoteServerSchema:
-    """Wire contract of a MolmoAct2 /act HTTP endpoint."""
+    """Wire contract of a MolmoAct2 /act HTTP endpoint.
+
+    camera_keys are the JSON field names sent to the server. sim_camera_keys
+    are the ManiSkill sensor uids to pull frames from for each entry of
+    camera_keys, in order; defaults to camera_keys itself (sim uid == wire
+    key), which is the case for every schema except "droid_3cam" below,
+    where the wire keys the server expects don't match this repo's existing
+    sim camera uids.
+    """
     name: str
     camera_keys: tuple[str, ...]
     state_dim: int
     default_port: int
     norm_tag: str
+    sim_camera_keys: tuple[str, ...] = None
+
+    def __post_init__(self):
+        if self.sim_camera_keys is None:
+            object.__setattr__(self, "sim_camera_keys", self.camera_keys)
 
 
 MOLMOACT2_SCHEMAS: dict[str, RemoteServerSchema] = {
@@ -23,6 +36,15 @@ MOLMOACT2_SCHEMAS: dict[str, RemoteServerSchema] = {
         camera_keys=("external_cam", "wrist_cam"),
         state_dim=8,
         default_port=8000,
+        norm_tag="franka_droid",
+    ),
+    "droid_3cam": RemoteServerSchema(
+        name="droid_3cam",
+        # Wire keys expected by sim_eval/policy_server.py's IMAGE_KEYS.
+        camera_keys=("exterior_1_left", "exterior_2_left", "wrist_left"),
+        sim_camera_keys=("external_cam", "exterior_2_left", "wrist_cam"),
+        state_dim=8,
+        default_port=8100,
         norm_tag="franka_droid",
     ),
     "yam": RemoteServerSchema(

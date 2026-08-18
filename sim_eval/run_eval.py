@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 import mani_skill.envs  # noqa: F401
 from .tasks import *  # noqa: F401, F403
-from .inference.client import DroidClient, YAMClient, MolmoActClientBase
+from .inference.client import DroidClient, Droid3CamClient, YAMClient, MolmoActClientBase
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ DEFAULT_LANGUAGE_INSTRUCTIONS: dict[str, str] = {
 }
 
 
-PolicyType = Literal["remote-droid", "remote-yam"]
+PolicyType = Literal["remote-droid", "remote-droid-3cam", "remote-yam"]
 
 
 @dataclass
@@ -50,7 +50,7 @@ class EvalConfig:
     """MolmoAct2 closed-loop policy evaluation on ManiSkill."""
 
     policy_type: Annotated[PolicyType, tyro.conf.arg(aliases=["-p"])] = "remote-yam"
-    """'remote-droid' or 'remote-yam'."""
+    """'remote-droid', 'remote-droid-3cam', or 'remote-yam'."""
 
     remote_url: Optional[str] = None
     """Full /act endpoint URL, e.g. http://<host>:8202/act."""
@@ -267,7 +267,7 @@ def main() -> None:
             "  -e BimanualYAMPutEverythingInBox-v1"
         )
 
-    _clients = {"remote-droid": DroidClient, "remote-yam": YAMClient}
+    _clients = {"remote-droid": DroidClient, "remote-droid-3cam": Droid3CamClient, "remote-yam": YAMClient}
     if config.policy_type not in _clients:
         raise SystemExit(f"Unknown --policy-type '{config.policy_type}'. "
                          f"Known: {sorted(_clients.keys())}")

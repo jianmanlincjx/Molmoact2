@@ -113,8 +113,8 @@ class _MolmoActHTTPClient(MolmoActClientBase):
             qpos = np.asarray(self.state_adapter(qpos), dtype=np.float32)
 
         payload: dict = {"instruction": instruction, "state": qpos}
-        for cam_key in self.schema.camera_keys:
-            payload[cam_key] = extract_camera(obs, cam_key)
+        for wire_key, sim_key in zip(self.schema.camera_keys, self.schema.sim_camera_keys):
+            payload[wire_key] = extract_camera(obs, sim_key)
 
         t0 = time.time()
         resp = self._session.post(
@@ -140,6 +140,16 @@ class _MolmoActHTTPClient(MolmoActClientBase):
 class DroidClient(_MolmoActHTTPClient):
     """MolmoAct2-DROID client (external_cam + wrist_cam, 8-D state)."""
     schema         = MOLMOACT2_SCHEMAS["droid"]
+    state_adapter  = staticmethod(droid_state_adapter)
+    action_adapter = None
+
+
+class Droid3CamClient(_MolmoActHTTPClient):
+    """Client for the local goal-pose-prior checkpoint server
+    (sim_eval/policy_server.py), which wants two distinct exterior views
+    (exterior_1_left/exterior_2_left) plus a wrist view (wrist_left),
+    8-D state."""
+    schema         = MOLMOACT2_SCHEMAS["droid_3cam"]
     state_adapter  = staticmethod(droid_state_adapter)
     action_adapter = None
 
