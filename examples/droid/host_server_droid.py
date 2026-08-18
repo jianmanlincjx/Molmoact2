@@ -1,10 +1,29 @@
 """MolmoAct2-DROID inference server.
 
-Wire protocol (matches `inference_script.py` client):
+The released checkpoint was fine-tuned with THREE camera slots -- two
+distinct DROID exterior (ZED) views plus one wrist view, ordered
+exterior_1, exterior_2, wrist. This is confirmed by the checkpoint's own
+`norm_stats.json` ("franka_droid" tag's `camera_keys`) and its model-card
+README, not just the `experiments/` reproduction recipe. See
+`scripts/droid_goal_prior/host_server_stage2.py`, whose `IMAGE_KEYS`/
+`_resolve_images` this mirrors.
+
+Wire protocol:
 
     GET  /act        -> health check, returns {"status": "ok", ...}
     POST /act        -> action inference
-        request body  (json_numpy):
+        request body (json_numpy), preferred 3-camera form:
+            {
+              "exterior_1_left": ndarray(H, W, 3) uint8 RGB,
+              "exterior_2_left": ndarray(H, W, 3) uint8 RGB,
+              "wrist_left":      ndarray(H, W, 3) uint8 RGB,
+              "instruction":     str,
+              "state":           ndarray(8,)  float32  [q1..q7, gripper],
+              "timestamp":       float (optional),
+            }
+        Also accepted, for backward compatibility with existing 2-camera
+        clients (`logs/inference_script.py`, `sim_eval`'s `DroidClient` --
+        both only ever have one exterior view to give it):
             {
               "external_cam": ndarray(H, W, 3) uint8 RGB,
               "wrist_cam":    ndarray(H, W, 3) uint8 RGB,
@@ -12,6 +31,12 @@ Wire protocol (matches `inference_script.py` client):
               "state":        ndarray(8,)  float32  [q1..q7, gripper],
               "timestamp":    float (optional),
             }
+        In the 2-camera form, `external_cam` is duplicated into both
+        `exterior_1_left`/`exterior_2_left` slots -- matches the checkpoint
+        README's own documented fallback, but is an approximation of two
+        genuinely distinct stereo viewpoints, not equivalent to sending
+        real ones. A warning is logged once per process on first use (see
+        `_resolve_images`).
         response body (json_numpy):
             {"actions": ndarray(N, 8) float32, "dt_ms": float}
 
@@ -54,6 +79,14 @@ log = logging.getLogger("molmoact2.server")
 REPO_ID = "allenai/MolmoAct2-DROID"
 NORM_TAG = "franka_droid"
 DEFAULT_NUM_STEPS = 10
+
+# Same three keys, same order, as `scripts/droid_goal_prior/host_server_stage2.py`
+# and the checkpoint's own norm_stats.json["metadata_by_tag"]["franka_droid"]["camera_keys"].
+IMAGE_KEYS = ("exterior_1_left", "exterior_2_left", "wrist_left")
+# Legacy 2-camera wire schema `logs/inference_script.py` and `sim_eval`'s
+# `DroidClient` already speak -- one exterior view, not two. Accepted as a
+# fallback so both can hit this server unmodified; see `_resolve_images`.
+LEGACY_DROID_CAMERA_KEYS = ("external_cam", "wrist_cam")
 
 
 def _patch_modeling_for_bf16(local_dir: str) -> None:
@@ -201,15 +234,17 @@ class Policy:
     @torch.inference_mode()
     def predict(
         self,
-        external_cam: np.ndarray,
-        wrist_cam: np.ndarray,
+        exterior_1_left: np.ndarray,
+        exterior_2_left: np.ndarray,
+        wrist_left: np.ndarray,
         instruction: str,
         state: np.ndarray,
         num_steps: int = DEFAULT_NUM_STEPS,
         enable_cuda_graph: bool = False,
     ) -> np.ndarray:
-        ext_pil = _to_pil(external_cam)
-        wri_pil = _to_pil(wrist_cam)
+        ext1_pil = _to_pil(exterior_1_left)
+        ext2_pil = _to_pil(exterior_2_left)
+        wri_pil = _to_pil(wrist_left)
         state_f32 = np.asarray(state, dtype=np.float32).reshape(-1)
         if state_f32.shape != (8,):
             raise ValueError(f"state must be shape (8,), got {state_f32.shape}")
@@ -217,7 +252,7 @@ class Policy:
         with self._lock:
             out = self.model.predict_action(
                 processor=self.processor,
-                images=[ext_pil, wri_pil],
+                images=[ext1_pil, ext2_pil, wri_pil],
                 task=instruction,
                 state=state_f32,
                 norm_tag=NORM_TAG,
@@ -247,6 +282,36 @@ def _to_pil(arr: Any) -> Image.Image:
     return Image.fromarray(a, mode="RGB")
 
 
+_warned_legacy_cameras = False
+
+
+def _resolve_images(payload: dict) -> dict[str, np.ndarray]:
+    """Accept either the real 3-camera payload or the legacy 2-camera one,
+    mirroring `scripts/droid_goal_prior/host_server_stage2.py`'s
+    `_resolve_images`."""
+    global _warned_legacy_cameras
+    if all(key in payload for key in IMAGE_KEYS):
+        return {key: payload[key] for key in IMAGE_KEYS}
+    if all(key in payload for key in LEGACY_DROID_CAMERA_KEYS):
+        if not _warned_legacy_cameras:
+            log.warning(
+                "Received legacy 2-camera payload (%s) -- this checkpoint wants two "
+                "DISTINCT exterior views plus a wrist view. Duplicating external_cam "
+                "into both exterior_1_left/exterior_2_left; this is an approximation "
+                "of what the checkpoint was trained on, not equivalent to it. "
+                "(logged once)",
+                LEGACY_DROID_CAMERA_KEYS,
+            )
+            _warned_legacy_cameras = True
+        ext = payload["external_cam"]
+        return {"exterior_1_left": ext, "exterior_2_left": ext, "wrist_left": payload["wrist_cam"]}
+    missing = [key for key in IMAGE_KEYS if key not in payload]
+    raise ValueError(
+        f"payload is missing camera fields: need either {IMAGE_KEYS} or "
+        f"{LEGACY_DROID_CAMERA_KEYS}; missing {missing}"
+    )
+
+
 def build_app(policy: Policy) -> FastAPI:
     app = FastAPI(title="MolmoAct2-DROID server", version="0.1.0")
 
@@ -257,6 +322,8 @@ def build_app(policy: Policy) -> FastAPI:
                 "status": "ok",
                 "repo_id": REPO_ID,
                 "norm_tag": NORM_TAG,
+                "camera_keys": list(IMAGE_KEYS),
+                "legacy_camera_keys_accepted": list(LEGACY_DROID_CAMERA_KEYS),
                 "device": policy.device,
                 "dtype": str(policy.model.dtype),
             }
@@ -275,12 +342,13 @@ def build_app(policy: Policy) -> FastAPI:
             return _error_response(400, f"failed to decode json_numpy body: {e}")
 
         try:
-            external_cam = payload["external_cam"]
-            wrist_cam = payload["wrist_cam"]
+            images = _resolve_images(payload)
             instruction = str(payload["instruction"])
             state = payload["state"]
         except KeyError as e:
             return _error_response(400, f"missing required field: {e}")
+        except ValueError as e:
+            return _error_response(400, str(e))
 
         num_steps = int(payload.get("num_steps", DEFAULT_NUM_STEPS))
         enable_cuda_graph = bool(
@@ -290,8 +358,9 @@ def build_app(policy: Policy) -> FastAPI:
         t0 = time.perf_counter()
         try:
             actions = policy.predict(
-                external_cam=external_cam,
-                wrist_cam=wrist_cam,
+                exterior_1_left=images["exterior_1_left"],
+                exterior_2_left=images["exterior_2_left"],
+                wrist_left=images["wrist_left"],
                 instruction=instruction,
                 state=state,
                 num_steps=num_steps,
@@ -322,8 +391,9 @@ def warmup(policy: Policy) -> None:
     t0 = time.perf_counter()
     try:
         policy.predict(
-            external_cam=dummy_img,
-            wrist_cam=dummy_img,
+            exterior_1_left=dummy_img,
+            exterior_2_left=dummy_img,
+            wrist_left=dummy_img,
             instruction="warmup",
             state=dummy_state,
             num_steps=DEFAULT_NUM_STEPS,
