@@ -5,8 +5,9 @@
 ```bash
 source .venv/bin/activate
 
+# USE 3-CAM EVAL !!!
 python -m sim_eval.run_eval \
-    --policy-type remote-droid \
+    --policy-type remote-droid-3cam \
     --remote-url <URL> \
     -e DroidPutEverythingInBox-v1 \
     -n 50 \
