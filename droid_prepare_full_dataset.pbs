@@ -1,0 +1,21 @@
+#!/bin/bash
+#PBS -P CFP05-CF-002
+#PBS -j oe
+#PBS -N droid-goalprior-prepare-full
+#PBS -q auto
+#PBS -l select=1:ngpus=1
+#PBS -l walltime=24:00:00
+
+# CPU/IO-bound dataset build (no GPU used); requesting 1 GPU only because
+# this cluster schedules all jobs through GPU-bearing nodes/queues.
+
+cd /nfs/home/svu/shailesh.xml/Molmoact2
+
+lerobot/.venv/bin/python scripts/droid_goal_prior/prepare_dataset.py \
+  --source-root /scratch/shailesh.xml/datasets/droid_1.0.1 \
+  --output-root /scratch/shailesh.xml/datasets/droid_1.0.1_goal_pose
+
+lerobot/.venv/bin/python scripts/droid_goal_prior/prepare_dataset.py \
+  --source-root /scratch/shailesh.xml/datasets/droid_1.0.1 \
+  --output-root /scratch/shailesh.xml/datasets/droid_1.0.1_goal_pose \
+  --verify-only

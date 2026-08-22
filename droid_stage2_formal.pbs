@@ -1,0 +1,80 @@
+#!/bin/bash
+#PBS -P CFP05-CF-002
+#PBS -j oe
+#PBS -N droid-stage2-omp
+#PBS -q auto
+#PBS -l select=1:ngpus=8
+#PBS -l walltime=48:00:00
+
+# Stage2 formal WITH the CPU-oversubscription fix.
+#
+# Root cause (found 2026-08-08, job 556042 + probe 556096): `accelerate launch`
+# does not set OMP_NUM_THREADS, so torch used 64 intra-op threads per rank ->
+# 8 x 64 = 512 OpenMP threads on the 96 cores PBS grants. OpenMP busy-waits at
+# barriers, so cores were pegged spinning instead of working: cpupercent 8773
+# (~88/96 cores) while the pipeline produced ~4.4 samples/s. Probe 556096 showed
+# a sample costs only ~0.35 CPU-seconds, i.e. ~1.5 cores of real work against
+# ~88 burned -- the dataloader workers were simply starved of CPU, which is why
+# data_s sat at ~100s no matter what NUM_WORKERS was. The fix is in
+# scripts/train_droid_molmoact2.sh (OMP_NUM_THREADS/MKL_NUM_THREADS default 1),
+# matching what this repo's LIBERO eval scripts already do.
+#
+# Runs alongside 556042 without disturbing it:
+#  - separate OUTPUT_DIR (556042 still owns .../stage2)
+#  - ISOLATED HF cache. A second process pointing at the same HF_HOME blocks
+#    forever in rpc_wait_bit_killable on the datasets .lock held by the live
+#    run. The copy is hardlink-based (cp -al), so it is instant and uses ~no
+#    extra quota; inherited .lock hardlinks are deleted so locking is separate.
+
+set -uo pipefail
+cd /nfs/home/svu/shailesh.xml/Molmoact2
+
+export DATASET_ROOT=/scratch/shailesh.xml/datasets/droid_1.0.1_goal_pose
+export SAMPLE_MANIFEST_PATH="${DATASET_ROOT}/valid_anchor_indices.parquet"
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export RESUME_MODE=auto
+
+export STAGE1_OUTPUT_DIR=/scratch/shailesh.xml/outputs/droid_goal_prior/seed_1000/stage1
+export OUTPUT_DIR=/scratch/shailesh.xml/outputs/droid_goal_prior/seed_1000/stage2_omp
+
+export WANDB_ENABLE=true
+export WANDB_PROJECT=molmoact2-droid
+export WANDB_DISABLE_ARTIFACT=true
+
+# bs 64 -> 128/GPU (2026-08-08): global batch 512 -> 1024, matching Stage1's
+# own global batch (128*8). LRs raised to match in train_stage2.sh (full-model
+# training values from prior work, not batch-derived scaling).
+# Fragmentation guard. bs=128 (job 556212) did NOT actually exceed capacity: it
+# needed 77.09 + 64.02 = 141.1 GiB vs 139.80 available -- short by 1.3 GiB --
+# while holding 23.08 GiB "reserved by PyTorch but unallocated". True data need
+# was ~118 GiB. expandable_segments is PyTorch's own recommended remedy for that
+# pattern, and bs=96 is projected ~117-127 GiB, close enough that reclaiming
+# fragmented reserve is what keeps it safe.
+export PYTORCH_ALLOC_CONF=expandable_segments:True
+
+# bs=96/GPU -> global batch 768. Between the proven 64 (556152 ran clean at
+# mem_gb 94.7/139.8) and 128 (OOM'd on fragmentation, see above).
+export BATCH_SIZE=96
+# At global batch 768 one epoch is 17259872/768 = 22473.8 steps, so 100000
+# steps = 4.45 epochs.
+export STEPS=100000
+# 100000/5000 = 20 checkpoints ~= 260GB, inside the ~308GB quota. At ~16s/step
+# that is a checkpoint per ~22h, inside the 48h walltime.
+export SAVE_FREQ=5000
+export NUM_WORKERS=12
+
+# Isolate the HF cache from the live run's lock (see header).
+SRC_CACHE=/scratch/shailesh.xml/.cache/Molmoact2/huggingface
+OMP_ROOT=/scratch/shailesh.xml/.cache/Molmoact2_omp
+export HF_HOME="${OMP_ROOT}/huggingface"
+export HUGGINGFACE_HUB_CACHE="${HF_HOME}/hub"
+export HF_DATASETS_CACHE="${HF_HOME}/datasets"
+export TMPDIR="${OMP_ROOT}/tmp"
+rm -rf "${OMP_ROOT}"
+mkdir -p "${OMP_ROOT}" "${TMPDIR}"
+cp -al "${SRC_CACHE}" "${HF_HOME}" || { echo "hardlink cache copy FAILED"; exit 1; }
+find "${HF_HOME}" -name "*.lock" -delete 2>/dev/null
+echo "[omp] isolated HF_HOME=${HF_HOME}"
+
+echo "[omp] OMP_NUM_THREADS will default to 1 via scripts/train_droid_molmoact2.sh"
+bash scripts/droid_goal_prior/train_stage2.sh

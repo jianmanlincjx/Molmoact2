@@ -1,0 +1,38 @@
+#!/bin/bash
+#PBS -P CFP05-CF-002
+#PBS -j oe
+#PBS -N droid-goalprior-stage1-formal
+#PBS -q auto
+#PBS -l select=1:ngpus=8
+#PBS -l walltime=48:00:00
+
+cd /nfs/home/svu/shailesh.xml/Molmoact2
+
+export DATASET_ROOT=/scratch/shailesh.xml/datasets/droid_1.0.1_goal_pose
+export SAMPLE_MANIFEST_PATH="${DATASET_ROOT}/valid_anchor_indices.parquet"
+export CHECKPOINT_PATH=/scratch/shailesh.xml/checkpoints/MolmoAct2
+export VLM_CHECKPOINT_PATH=/scratch/shailesh.xml/checkpoints/Molmo2-ER
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export RESUME_MODE=auto
+
+# Checkpoints are ~14GB each; the NFS home quota is only 40GB, so run output
+# (checkpoints + local wandb mirror) lives on /scratch instead, same as the
+# dataset/checkpoints inputs.
+export OUTPUT_DIR=/scratch/shailesh.xml/outputs/droid_goal_prior/seed_1000/stage1
+
+# Checkpoint every 2.5k steps instead of the 10k default: at ~8s/step that's
+# roughly a 5.5h loss ceiling if a job dies right before a walltime cutoff,
+# instead of ~22h.
+export SAVE_FREQ=2500
+
+export WANDB_ENABLE=true
+export WANDB_PROJECT=molmoact2-droid
+# See train_droid_molmoact2.sh: WANDB_DISABLE_ARTIFACT already defaults to
+# true (no ~14GB-per-checkpoint upload to wandb), set explicitly here so the
+# intent isn't hidden behind a script default.
+export WANDB_DISABLE_ARTIFACT=true
+
+# 50k steps, batch 128/GPU (README-pinned formal recipe). RESUME_MODE=auto
+# means re-submitting this same script after a walltime cutoff resumes from
+# the last saved checkpoint instead of starting over.
+bash scripts/droid_goal_prior/train_stage1.sh
