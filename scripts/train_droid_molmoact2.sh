@@ -317,6 +317,13 @@ RESUME_MODE="${RESUME_MODE:-auto}"
 RESUME_CHECKPOINT="${RESUME_CHECKPOINT:-}"
 STEPS="${STEPS:-10000}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
+# Micro-batches per optimizer step. Global batch is
+# BATCH_SIZE * n_gpus * GRAD_ACCUM_STEPS. STEPS still counts optimizer steps,
+# so the loop consumes STEPS * GRAD_ACCUM_STEPS batches. Requires the
+# gradient-accumulation support in lerobot (feat/gradient-accumulation);
+# on a build without it this flag would be rejected by the arg parser rather
+# than silently ignored.
+GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-2500}"
 LOG_FREQ="${LOG_FREQ:-20}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
@@ -393,7 +400,8 @@ echo "[droid] dataset=${DATASET_REPO_ID} root=${DATASET_ROOT}"
 echo "[droid] manifest=${SAMPLE_MANIFEST_PATH}"
 echo "[droid] policy_path=${POLICY_PATH:-<fresh>} checkpoint=${CHECKPOINT_PATH}@${CHECKPOINT_REVISION}"
 echo "[droid] output_dir=${OUTPUT_DIR}"
-echo "[droid] batch_size/gpu=${BATCH_SIZE} steps=${STEPS} seed=${SEED}"
+echo "[droid] batch_size/gpu=${BATCH_SIZE} accum=${GRAD_ACCUM_STEPS} steps=${STEPS} (optimizer steps) seed=${SEED}"
+echo "[droid] global batch=$((BATCH_SIZE * NUM_PROCESSES * GRAD_ACCUM_STEPS))"
 echo "[droid] action_mode=${ACTION_MODE} action_expert_only=${TRAIN_ACTION_EXPERT_ONLY} visual_disabled=${DISABLE_VISUAL_INPUT}"
 echo "[droid] tolerance_s=${TOLERANCE_S}"
 echo "[droid] AdamW betas=${OPTIMIZER_BETAS} eps=${OPTIMIZER_EPS} weight_decay=${OPTIMIZER_WEIGHT_DECAY} grad_clip=${OPTIMIZER_GRAD_CLIP_NORM}"
@@ -417,6 +425,7 @@ if [[ -n "${RESUME_CONFIG_PATH}" ]]; then
     --resume=true
     --output_dir="${OUTPUT_DIR}"
     --steps="${STEPS}"
+    --gradient_accumulation_steps="${GRAD_ACCUM_STEPS}"
     --log_freq="${LOG_FREQ}"
     --save_freq="${SAVE_FREQ}"
     --eval_freq=-1
@@ -467,6 +476,7 @@ else
     --seed="${SEED}"
     --resume=false
     --batch_size="${BATCH_SIZE}"
+    --gradient_accumulation_steps="${GRAD_ACCUM_STEPS}"
     --num_workers="${NUM_WORKERS}"
     --log_freq="${LOG_FREQ}"
     --eval_freq=-1
