@@ -120,6 +120,14 @@ verify_download("MolmoAct2", sys.argv[1], sys.argv[2])
 verify_download("Molmo2-ER", sys.argv[3], sys.argv[4])
 PY
 
+# The provenance SHA-256 set covers only 7 metadata artifacts -- NOT the
+# data/**.parquet files. A truncated transfer passes every provenance check and
+# then dies ~70 s in, inside the dataloader, after the job has taken the GPUs
+# (this happened: job 62187, 33 of 86 files truncated). Half a second here.
+"${WS}/lerobot/.venv/bin/python" \
+  "${WS}/scripts/droid_baseline/check_dataset_integrity.py" \
+  --dataset-root "${DATASET_ROOT}"
+
 # No goal-pose flags at all. enable_goal_pose defaults to false
 # (configuration_molmoact2.py), which disables the SE(3) encoder, the learnable
 # goal queries, the semantic-visual module and the pose reconstruction loss in
