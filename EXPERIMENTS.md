@@ -90,3 +90,128 @@ bash scripts/libero_goal_prior_v3/train_stage2.sh
 - 归一化：在完整 train split 上分别重算 joint state、7D EE pose 和 action 的统计量；不得复用 LIBERO stats。检查每维 q01/q99、clip 比例、gripper 语义及 normalize→unnormalize round trip。
 - Smoke test：验证 future target 不跨 episode、RPY→axis-angle 转换正确、Stage1 可训练、Stage2 可从 Stage1 初始化、Stage2 推理不依赖 future pose，以及输出 action 与 DROID 真机控制格式一致。
 - 交付：核心模型/processor 修改提交到 `lerobot` 独立分支；DROID 数据准备、Stage1/Stage2 启动脚本和说明提交到主仓库，再由协作者执行全量统计与训练。
+---
+
+## Bimanual YAM Goal-Pose Prior Adaptation — Data and Two-Stage Scripts Wired Up
+
+- Status: **the three-task merged dataset is built and verified**; the Stage-1/Stage-2 launch
+  scripts are ready. The smoke runs must be **re-run against the merged dataset** on a node with
+  a GPU (the earlier smoke runs used the old single-task data).
+- Dataset: `real_robot_datasets/yam_3task` — merged from three independently recorded datasets
+  (LeRobot v3.0, `bi_yam_follower`, **292 episodes, 283,886 frames**, **3 tasks**, **30 fps**,
+  three AV1 camera streams: top 360×640 / left 480×640 / right 480×640):
+
+  | Source dataset | Task | `task_index` | Episodes | Frames |
+  | --- | --- | ---: | ---: | ---: |
+  | `blocks_filtered` | "Put all blocks into the box." | 0 | 97 | 136,489 |
+  | `dustpan_filtered` | "Clean the table using the dust pan." | 1 | 100 | 58,018 |
+  | `transfer_filtered` | "Transfer the egg from the pan into the bowl." | 2 | 95 | 89,379 |
+
+- **Merge first, then derive.** `merge_datasets.py` combines the three recordings into one valid
+  v3.0 dataset, and `prepare_dataset.py` then runs on top of it **unchanged** — the validated
+  quaternion canonicalization, anchor construction and verification code are untouched. The three
+  recordings are byte-for-byte schema-identical but each numbers from 0, so a naive concatenation
+  collides in five places. Only one of them raises an error:
+  1. **All three use `task_index` 0** while their instructions differ. No check catches this; the
+     result is a language-blind policy mapping one token span onto three mutually incompatible
+     behaviors — the most dangerous of the five;
+  2. `episode_index` restarts, so episodes collide and per-episode quaternion canonicalization
+     would run across task seams;
+  3. the global `index` restarts, breaking the contiguity that `anchor_mask` asserts;
+  4. `data/file_index` is 0 everywhere;
+  5. video `file_index` restarts, and each camera splits at different shard boundaries
+     (blocks/transfer 2 shards per camera, dustpan 1), so frames would be pulled from the wrong
+     recording.
+
+  Videos are **neither decoded nor re-encoded**: each source shard is symlinked under its remapped
+  `file_index` (5 shards per camera after merging). This is exactly why each episode's
+  `from_timestamp`/`to_timestamp` remains valid — they are relative to their own shard, and shard
+  contents are unchanged.
+- **Both observation and action use absolute EEF pose**: `observation.state = action = 16-D`,
+  per arm `[xyz(3), quat wxyz(4), gripper(1)]`. The dataset also records `action_eef_delta` and
+  joint angles, but the delta columns are currently unreliable, so the derived view publishes only
+  the two canonical columns `observation.state` / `action` — otherwise all three `action_*` keys
+  would be mapped to policy action features by `dataset_to_policy_features`.
+- **The goal pose is simply `observation.state` at t+30**, matching the shared-key arrangement used
+  for LIBERO: the tensor carries a time axis and the processor reads `[:, 0]` as the current state
+  and `[:, -1]` as the goal. There is no separate goal feature and **no FK is required** (unlike the
+  20-D FK approach from the cubesv3 era, which is now retired).
+- **Quaternions rather than axis-angle for rotation.** The YAM grippers point down at the table, and
+  measured **17.0% (left) / 13.3% (right)** of frames have a rotation angle > 3.0 rad, sitting right
+  against the ±π antipode where axis-angle is discontinuous. `L_pose` (MSE in normalized space) is
+  not learnable on those frames.
+- **Quaternion double cover is handled** (q ≡ −q). The merged raw data contains **374 sign flips**
+  (284 left arm, 90 right arm) with a single-step |Δq| = 2.0, roughly **31×** the true maximum step.
+  `QuaternionCanonicalizer` aligns hemispheres in episode order (each frame's action follows its
+  state's hemisphere; state continuity carries across parquet file boundaries). After processing,
+  **zero residual flips** remain and the maximum single step drops to **0.0639**. Merging makes
+  episode numbering globally unique, so canonicalization never runs across a task seam.
+- **Temporal horizon H=30** (1.0 s at 30 fps, equivalent to LIBERO 10@10Hz and DROID 15@15Hz).
+  Measured chunk displacement at H=10 is 0.0123 m (left arm), only 1.3× the 0.0092 m servo tracking
+  lag — the goal condition is close to noise. At H=30 displacement is 0.0335 m (left) / 0.0745 m
+  (right), or 3.6× / 8× the lag.
+- **Normalization (the trap LIBERO fell into; gated here).** LeRobot v3.0 aggregates per-episode
+  statistics into a global `meta/stats.json`, which are not true global quantiles; on LIBERO that
+  defect clipped roughly 94% of state-Z targets to ±1. **Two of the three source recordings really
+  do hit it**: computed against their own bundled stats, the worst-dimension clip rate is
+  `blocks_filtered` 2.00% (clean), `dustpan_filtered` **24.19%**, `transfer_filtered` **15.95%**.
+  And it is not confined to gripper dimensions — `dustpan_filtered` clips 18.6% of `action`
+  `left_eef.qz`, and `transfer_filtered` clips 13.2% of `action` `left_eef.x`. Both of those
+  dimensions **participate in normalization** and feed directly into the flow-matching loss.
+  `merge_datasets.py` therefore writes **exact global statistics** rather than an aggregate of the
+  three, bringing the rate down to 2.00%; `prepare_dataset.py` then recomputes once more over the
+  scope "all frames of the included episodes". Measured worst clip on the published data is
+  **2.06%** (the theoretical floor for q01/q99), with round-trip error 1.1e-16. The gate remains in
+  place: `audit_normalization.py` uses a 5% threshold, verified to actually fail (exit 1) via a
+  negative control that injects bad quantiles.
+- Valid anchors: **275,067 / 283,886 frames (96.9%)**. Idle filtering (derived from consecutive
+  action differences, threshold 5e-4 and `min_idle_len` 14 at 30 fps) removes 59 frames in total on
+  the merged set, retained for contract alignment.
+- **Known issue (harmless, and not introduced by merging).** Six of the 15 merged shards (`file-000`
+  and `file-002` across all three cameras) report one fewer container frame than the number of rows
+  assigned to them. `blocks_filtered` and `dustpan_filtered` each showed this on their own shard 0
+  before merging; merging never re-encodes or re-splits video, so this is an encoder off-by-one on
+  the final frame of a shard. It is structurally safe: anchor rule 5 trims the last 30 frames of
+  every retained run, so on all 15 shards the last image any anchor requests sits **29–30 frames
+  before the end of its shard**. Verified directly: zero anchors out of range, minimum margin 29
+  frames. Re-check this if the horizon is increased or the trimming relaxed in future.
+- Data integrity: `artifact_sha256` covers **every derived data parquet**, not just metadata (DROID
+  previously hashed only metadata, letting 33 truncated parquet files pass verification and crash
+  only after occupying GPUs). Videos reuse the source data by symlink, so the derived view is only
+  14 MB.
+- **CUDA gate.** The first Stage-1 attempt ran at 195.62 s/step — the node driver reported CUDA 11.6
+  while the venv had torch 2.10.0+cu128 (which needs driver ≥525), and LeRobot silently fell back to
+  CPU (the tells in the log were `mem_gb:0.0` and an effective batch size of 1). The launch scripts
+  now carry a `REQUIRE_CUDA` precondition check, and refuse to start rather than silently degrade.
+- Verified on the merged dataset (runs to completion without a GPU node):
+  - `merge_datasets.py --verify-only`: re-hashes every artifact, re-checks the content digests of
+    all three sources, compares every non-remapped column against the source **element by element**,
+    confirms each episode's `task_index` round-trips to the same instruction string in metadata,
+    resolves every video symlink back to its source shard, and recomputes `meta/stats.json`
+  - `prepare_dataset.py --verify-only`: 275,067 anchors, all hashes/statistics/derived columns
+    recomputed consistently, asserting that canonicalization changed signs only (non-rotation
+    dimensions bitwise unchanged) and that residual flips in the published data are zero
+  - `audit_normalization.py`: worst_clip of **2.06%** on both features, round-trip error 1.1e-16
+  - Video-path spot check: 9 episodes × 3 cameras across all three sources, actually decoded with
+    ffmpeg at `from_timestamp`, all landing in the correct shard
+- To be re-run on a GPU node (earlier results were based on the old single-task data and are now
+  invalid):
+  - `validate_dataloader.py` (on the old single-task data it measured a tokenized length of 691 / 896
+    with 205 headroom; after merging, the longest instruction "Transfer the egg from the pan into the
+    bowl." adds roughly 4 tokens, still within headroom, but this needs to be measured — and confirm
+    that instructions genuinely vary across samples within a batch)
+  - Stage-1 / Stage-2 smoke runs: this is **the first time the language pathway does real work**
+  - the `train_stage1.sh` dry run and the `train_stage2.sh` lineage gate have both passed previously
+- Training budget: start with a short run to check health — **Stage 1 at 2,000 steps, Stage 2 at
+  5,000 steps**, 4 GPUs on crane7, Stage 2 at bs 8/GPU × 4 GPUs × accum 8 = global 256. Extend if
+  healthy.
+- Architecture and losses are **identical to LIBERO v3 / DROID** (100 tokens = 8 pose + 92 context,
+  6 layer groups, `mask_image_from_action_expert=true`, `L_flow + 0.3 L_pose`), and the `lerobot`
+  submodule **needs no changes at all**.
+- TODO: on a GPU node, re-run the Stage-1/Stage-2 smoke runs (20 steps each) against
+  `yam_3task_goal_pose` plus a Stage-2 memory probe (bs=8/GPU), then start formal training on
+  crane7. A single-GPU smoke run **does not cover DDP or gradient accumulation**, so verify those
+  separately on crane7 before the formal run. The existing Stage-1 checkpoint under
+  `outputs/yam_goal_prior/seed_1000/smoke/` was trained on the old single-task data; its
+  normalization statistics are invalidated by the dataset change (Stage 2's lineage precondition
+  will reject it) and it should be deleted.
