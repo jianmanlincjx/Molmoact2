@@ -4,7 +4,9 @@ v3 **不改训练代码 / 模型结构**，只修正数据集 `meta/stats.json` 
 `observation.state` 与 `action` 的 q01/q99（以及配套的 min/max/mean/std），
 再按 v2b 同配置重训 Stage2。
 
-**网络 / 信息流基线（改架构前必读）**：[ARCHITECTURE.md](ARCHITECTURE.md)
+**网络 / 信息流（V3+V4 合并文档，同步用）**：[../libero_goal_prior_v4/V3_VS_V4_FEATURE_FLOW.md](../libero_goal_prior_v4/V3_VS_V4_FEATURE_FLOW.md)
+
+**跨模型迁移规范（ImageWAM / π0.5）**：[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)
 
 复现使用 [`lerobot/libero`](https://huggingface.co/datasets/lerobot/libero)
 数据集的固定 revision

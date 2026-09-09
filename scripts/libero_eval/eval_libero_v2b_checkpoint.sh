@@ -22,12 +22,15 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as f:
     cfg = json.load(f)
 variant = sys.argv[2]
+# v4 hard bottleneck: all latents are pose-supervised (tokens == pose_tokens == 8).
+# v2b/v3 soft bottleneck: 100 latents with 8 pose + 92 context.
+num_tokens = 8 if variant == "v4" else 100
 expected = {
     "type": "molmoact2",
     "enable_goal_pose": True,
     "goal_conditioning_mode": "semantic_visual_recurrent",
     "goal_token_source": "learnable_queries",
-    "num_semantic_visual_tokens": 100,
+    "num_semantic_visual_tokens": num_tokens,
     "num_semantic_visual_pose_tokens": 8,
     "semantic_visual_hidden_dim": 768,
     "semantic_visual_enable_self_attention": True,
@@ -44,20 +47,30 @@ mismatches = [
     if cfg.get(key) != want
 ]
 pose_tokens = cfg.get("num_semantic_visual_pose_tokens")
-if not (isinstance(pose_tokens, int) and 1 <= pose_tokens < cfg.get("num_semantic_visual_tokens", 0)):
+total_tokens = cfg.get("num_semantic_visual_tokens", 0)
+if variant == "v4":
+    ok_pose = isinstance(pose_tokens, int) and 1 <= pose_tokens <= total_tokens
+    pose_rule = "1 <= P <= num_semantic_visual_tokens"
+else:
+    ok_pose = isinstance(pose_tokens, int) and 1 <= pose_tokens < total_tokens
+    pose_rule = "1 <= P < num_semantic_visual_tokens"
+if not ok_pose:
     mismatches.append(
-        "num_semantic_visual_pose_tokens: expected 1 <= P < num_semantic_visual_tokens, "
-        f"got {pose_tokens!r}"
+        f"num_semantic_visual_pose_tokens: expected {pose_rule}, "
+        f"got {pose_tokens!r} (total={total_tokens!r})"
     )
-if mismatches:
+if mismatches and __import__("os").environ.get("EVAL_SKIP_CONFIG_GUARD") != "1":
     raise SystemExit(
         "Refusing to evaluate: checkpoint is not a v2b-compatible semantic-visual Goal-Pose Prior:\n  "
         + "\n  ".join(mismatches)
     )
+elif mismatches:
+    # ablation arms (stagewise / open-visual-path / no-pose-loss) legitimately differ; opt-in skip
+    print("[eval] WARNING config guard skipped (EVAL_SKIP_CONFIG_GUARD=1):\n  " + "\n  ".join(mismatches))
 print(
     f"[eval] verified {variant}:"
-    f" mode={cfg['goal_conditioning_mode']}"
-    f" tokens={cfg['num_semantic_visual_tokens']}"
+    f" mode={cfg.get('goal_conditioning_mode')}"
+    f" tokens={cfg.get('num_semantic_visual_tokens')}"
     f" pose_tokens={pose_tokens}"
     f" groups={cfg['semantic_visual_num_layer_groups']}"
     f" self_attn={cfg['semantic_visual_enable_self_attention']}"
@@ -71,6 +84,7 @@ EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-32}"
 MAX_EPISODES_RENDERED="${MAX_EPISODES_RENDERED:-${EPISODES_PER_TASK}}"
 GPU_IDS=(${EVAL_GPU_IDS:-7})
 SUITES=(${EVAL_SUITES:-libero_spatial libero_object libero_10 libero_goal})
+TASK_IDS="${EVAL_TASK_IDS:-}"
 # OpenVLA public-leaderboard horizons (set OFFICIAL_HORIZONS=true for 50-ep board).
 OFFICIAL_HORIZONS="${OFFICIAL_HORIZONS:-false}"
 episode_length_for_suite() {
@@ -136,7 +150,8 @@ python - \
   "${MAX_EPISODES_RENDERED}" \
   "${EVAL_SEED}" \
   "${SUITES[*]}" \
-  "${GPU_IDS[*]}" <<'PY'
+  "${GPU_IDS[*]}" \
+  "${TASK_IDS}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -151,6 +166,7 @@ from pathlib import Path
     eval_seed,
     suites_text,
     gpu_ids_text,
+    task_ids_text,
 ) = sys.argv[1:]
 suites = suites_text.split()
 gpu_ids = gpu_ids_text.split()
@@ -168,6 +184,7 @@ payload = {
     "suite_gpu_map": {
         suite: gpu_ids[index % len(gpu_ids)] for index, suite in enumerate(suites)
     },
+    "task_ids": json.loads(task_ids_text) if task_ids_text else None,
     "official_horizons": __import__("os").environ.get("OFFICIAL_HORIZONS", "false"),
 }
 Path(output_path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -176,7 +193,7 @@ PY
 if [[ "${DRY_RUN:-false}" == "true" ]]; then
   echo "[dry-run] policy=${POLICY_PATH}"
   echo "[dry-run] output=${EVAL_ROOT}"
-  echo "[dry-run] suites=${SUITES[*]} episodes/task=${EPISODES_PER_TASK} gpus=${GPU_IDS[*]}"
+  echo "[dry-run] suites=${SUITES[*]} task_ids=${TASK_IDS:-all} episodes/task=${EPISODES_PER_TASK} gpus=${GPU_IDS[*]}"
   for index in "${!SUITES[@]}"; do
     echo "[dry-run] ${SUITES[$index]} -> GPU ${GPU_IDS[$((index % ${#GPU_IDS[@]}))]}"
   done
@@ -224,6 +241,9 @@ for index in "${!SUITES[@]}"; do
     )
     if [[ "${OFFICIAL_HORIZONS}" == "true" ]]; then
       cmd+=(--env.episode_length="$(episode_length_for_suite "${suite}")")
+    fi
+    if [[ -n "${TASK_IDS}" ]]; then
+      cmd+=(--env.task_ids="${TASK_IDS}")
     fi
     CUDA_VISIBLE_DEVICES="${gpu}" MUJOCO_EGL_DEVICE_ID="${gpu}" \
       "${cmd[@]}" >"${output_dir}/eval.log" 2>&1
