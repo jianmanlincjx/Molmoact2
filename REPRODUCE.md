@@ -3,6 +3,28 @@
 Everything below is MolmoAct2. The same two-stage recipe on π0.5, FAST-WAM and ImageWAM
 lives in their own repositories; see the table at the bottom.
 
+## Which branch, and why it says v4
+
+Use **`feat/libero-goal-prior-v4`**. The paper's method is the *v3* recipe — 100 latents with
+8 pose-supervised (`num_semantic_visual_tokens=100`, `num_semantic_visual_pose_tokens=8`),
+under `scripts/libero_goal_prior_v3/`. The v4 directory is a different, harder bottleneck
+(latents == pose tokens == 8) that the paper does **not** use; the branch is named after it
+only because that recipe was added later on the same line of development.
+
+Do not check out `feat/goal-pose-prior-v3`. It predates a revision to the v3 recipe's learning
+rates that every reported number depends on:
+
+| | that branch | what the paper uses |
+| --- | --- | --- |
+| action-expert LR | 1e-5 | **1e-4** |
+| action-expert warmup | 1000 | **5000** |
+| semantic-visual aggregator LR | 1e-5 | **1e-4** |
+| semantic-visual warmup | 1000 | **5000** |
+
+VLM, ViT and connector stay at 1e-5. Every ablation arm copies this same group of six learning
+rates and seven warmups, read from the reference checkpoint's `train_config.json` rather than
+from a script default.
+
 ## 0. What you need
 
 | | |
