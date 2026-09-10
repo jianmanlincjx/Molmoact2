@@ -133,35 +133,16 @@ before committing GPU hours.
 
 ## 5. Checkpoints
 
-Released under `paper_ckpt/molmoact2/`; each directory is self-contained
-(`model.safetensors`, `config.json`, `train_config.json`, normaliser tensors).
+Released directories (Hugging Face, link in the LIT hub). Each is a self-contained LeRobot policy
+(`model.safetensors`, `config.json`, `train_config.json`, normaliser tensors) — pass the directory to
+`--policy.path`.
 
 | Table row | Directory |
 | --- | --- |
-| Baseline | `baseline_030000` |
-| Full LIT | `lit_stage1_010000` -> `lit_full_stage2_030000` |
-| Vanilla staged training | `abl1_stagewise_stage1_010000` -> `abl1_stagewise_stage2_030000` |
-| LIT w/o Stage-1 | `abl4_wo_stage1_030000` |
-| Latent interface only | `abl5_latent_only_020000` |
+| Baseline | `molmoact2/baseline` |
+| Full LIT | `molmoact2/lit_stage1` (action prior) -> `molmoact2/lit_stage2` (reported model) |
 
-## Verified on a fresh machine
-
-2026-09-10, from a clean clone of this branch (`git clone --recursive`), the released checkpoints load
-and roll out with the commands below (LIBERO and LIBERO-Plus, pose overlay on). The five entry points
-fail fast with a message naming the variable to set if `LIBERO_RESOURCE_ROOT` / `DATASET_ROOT` are
-missing; nothing else needs editing.
-
-```bash
-# in-distribution, one task, two episodes
-python -m lerobot.scripts.lerobot_eval --policy.path=<ckpt_dir> --policy.inference_action_mode=continuous   --env.type=libero --env.task=libero_spatial --env.task_ids="[0]" --eval.n_episodes=2 --eval.batch_size=1 --seed=1000
-
-# LIBERO-Plus variant: LIBERO-plus must come first on PYTHONPATH, and LIBERO_CONFIG_PATH must be set
-LIBERO_PLUS_FIX_LANG=1 LIBERO_CONFIG_PATH=$PWD/.cache/libero_config_plus PYTHONPATH=<LIBERO-plus>:$PWD/lerobot/src python -m lerobot.scripts.lerobot_eval --policy.path=<ckpt_dir>   --policy.inference_action_mode=continuous --env.type=libero_plus --env.task=libero_spatial --env.task_ids="[608]"   --eval.n_episodes=1 --eval.batch_size=1 --seed=1000
-```
-
-`<ckpt_dir>` is the directory holding `config.json` (the released checkpoints are flat). The wrapper
-scripts, a pre-flight check and the aggregation code live in
-[jianmanlincjx/LIT](https://github.com/jianmanlincjx/LIT) under `scripts/`.
+Ablation checkpoints are not released.
 
 ## 6. The same method on other backbones
 
