@@ -113,7 +113,7 @@ for suite in "${SUITES[@]}"; do
       ;;
   esac
 done
-RESOURCE_ROOT="${LIBERO_RESOURCE_ROOT:-/data2/JM/Code/molmo_serious/molmoact2-main}"
+RESOURCE_ROOT="${LIBERO_RESOURCE_ROOT:-${WS}}"
 export LIBERO_CONFIG_PATH="${LIBERO_CONFIG_PATH:-${RESOURCE_ROOT}/.cache/libero_config}"
 export HF_HOME="${HF_HOME:-${RESOURCE_ROOT}/.cache/huggingface}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${RESOURCE_ROOT}/.cache/hf_datasets}"

@@ -30,8 +30,13 @@ else
 fi
 
 SUITES=(${EVAL_SUITES:-libero_object libero_10 libero_goal libero_spatial})
-RESOURCE_ROOT="${LIBERO_RESOURCE_ROOT:-/data2/JM/Code/molmo_serious/molmoact2-main}"
+RESOURCE_ROOT="${LIBERO_RESOURCE_ROOT:-${WS}}"
 LIBERO_PLUS_ROOT="${LIBERO_PLUS_ROOT:-${RESOURCE_ROOT}/third_party/LIBERO-plus}"
+if [[ -z "${LIBERO_PLUS_ROOT}" || ! -d "${LIBERO_PLUS_ROOT}" ]]; then
+  echo "LIBERO-Plus not found. Set LIBERO_PLUS_ROOT to your LIBERO-plus checkout," >&2
+  echo "or LIBERO_RESOURCE_ROOT to the directory that contains third_party/LIBERO-plus." >&2
+  exit 2
+fi
 LIBERO_PLUS_PACKAGE="${LIBERO_PLUS_ROOT}/libero/libero"
 CLASSIFICATION="${LIBERO_PLUS_CLASSIFICATION:-${LIBERO_PLUS_PACKAGE}/benchmark/task_classification.json}"
 
