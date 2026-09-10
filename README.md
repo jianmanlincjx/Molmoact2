@@ -3,7 +3,7 @@
 The **Latent Interface Training (LIT)** instantiation of *Breaking the Vision–Action Shortcut: Latent
 Interface Training for Generalizable Robot Foundation Models* on MolmoAct2.
 Hub, project page, checkpoints: https://github.com/jianmanlincjx/LIT · https://jianmanlincjx.github.io/LIT/ ·
-https://huggingface.co/linjianman/LIT
+https://huggingface.co/linjianman/LIT (public, no login needed)
 
 This is a fork of [MolmoAct2](https://github.com/allenai/molmoact2) (the original README is
 [`README_upstream.md`](./README_upstream.md)). Use branch **`feat/libero-goal-prior-v4`** and clone with
@@ -84,6 +84,7 @@ videos on the project page).
 | Backbone | `Checkpoint/MolmoAct2` — the released MolmoAct2 weights |
 | VLM bootstrap | `Checkpoint/Molmo2-ER` ([`allenai/Molmo2-ER`](https://huggingface.co/allenai/Molmo2-ER)) |
 | Data | LIBERO in LeRobot format, all four suites, `no_noops` — 1,693 episodes / 273K frames; set `DATASET_ROOT` |
+| Real-robot data | [`chinchinati/yam_bimanual_manipulation`](https://huggingface.co/datasets/chinchinati/yam_bimanual_manipulation) — the paper's YAM dual-arm demonstrations: three tasks, 292 episodes, LeRobot v3.0, 4.8 GB, public |
 
 The dataset's `meta/stats.json` must be the recomputed one: an earlier version had bad quantiles that clipped
 82% of the state-Z range (`stats.v3_recompute_note.json` records the fix).
