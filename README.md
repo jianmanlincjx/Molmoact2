@@ -1,3 +1,11 @@
+> **Latent Interface Training (LIT) — this fork.**
+> This repository is the MolmoAct2 instantiation of *Breaking the Vision–Action Shortcut: Latent
+> Interface Training for Generalizable Robot Foundation Models*. The upstream README follows
+> below unchanged. For the paper's training recipe, evaluation protocols and checkpoint map,
+> read [`REPRODUCE.md`](./REPRODUCE.md); the cross-framework hub, project page and released
+> checkpoints are at [jianmanlincjx/LIT](https://github.com/jianmanlincjx/LIT).
+> Use branch `feat/libero-goal-prior-v4`.
+
 # Learning Visually Steerable Action Priors for Generalizable Robot Manipulation
 
 > **Decoupling visual goal inference from goal-conditioned motion generation.**
