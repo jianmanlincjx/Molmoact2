@@ -93,27 +93,34 @@ The dataset's `meta/stats.json` must be the recomputed one: an earlier version h
 same clean bootstrap as LIT (Molmo2-ER VLM weights + randomly re-initialised action expert):
 
 ```bash
-SEED=1000 STEPS=30000 BATCH_SIZE=32 bash scripts/libero_goal_prior/train_baseline.sh
+SEED=1000 STEPS=30000 BATCH_SIZE=32 OPTIMIZER_ACTION_EXPERT_LR=1e-4 SCHEDULER_ACTION_EXPERT_WARMUP_STEPS=5000 \
+  bash scripts/libero_goal_prior/train_baseline.sh
 ```
 
 **LIT** — two runs, in order:
 
 ```bash
 # Stage 1 — language + state + chunk-end SE(3) -> action prior; no images; VLM frozen
-SEED=1000 STEPS=10000 BATCH_SIZE=128 bash scripts/libero_goal_prior/train_stage1.sh
+SEED=1000 STEPS=10000 BATCH_SIZE=128 bash scripts/libero_goal_prior_v3/train_stage1.sh
 
-# Stage 2 — 100 learnable latents aggregate the backbone; image tokens are masked out of the action
-# expert; 8 latents are supervised to reconstruct the same SE(3) pose
+# Stage 2 — 100 learnable latents (8 pose-supervised + 92 context) aggregate the backbone; image tokens
+# are masked out of the action expert; initialised from Stage 1 step 010000
 SEED=1000 STEPS=30000 BATCH_SIZE=32 \
-  STAGE1_OUTPUT_DIR=lerobot/outputs/libero_goal_prior/seed_1000/stage1 \
-  bash scripts/libero_goal_prior/train_stage2.sh
+  STAGE1_OUTPUT_DIR=lerobot/outputs/libero_goal_prior_v3/seed_1000/stage1 \
+  bash scripts/libero_goal_prior_v3/train_stage2.sh
 ```
 
-To skip Stage 1, start Stage 2 from the released prior: `POLICY_PATH=./LIT_ckpt/molmoact2/lit_stage1` in place of `STAGE1_OUTPUT_DIR`.
+Use the **`_v3`** launchers: their defaults are exactly the released `train_config.json` of the paper's
+checkpoints (job names `molmoact2-goalprior-stage{1,2}-v3`). `scripts/libero_goal_prior/` is the earlier
+recipe and `_v4/` is the 8-latent hard-bottleneck variant — neither reproduces the paper. Batch sizes are
+per GPU (the paper used 7 GPUs: 896 / 224 effective).
+
+To skip Stage 1, start Stage 2 from the released prior:
+`ALLOW_NON_V3_STAGE1=1 POLICY_PATH=./LIT_ckpt/molmoact2/lit_stage1 bash scripts/libero_goal_prior_v3/train_stage2.sh`.
 
 Stage 1's SE(3) encoder is training-time scaffolding: Stage 2 discards it (6 unexpected keys at load) and the
 latents predict the pose from vision instead, so no privileged pose input exists at inference. Then evaluate
-`lerobot/outputs/libero_goal_prior/seed_1000/stage2/checkpoints/030000/pretrained_model` exactly as in §1.
+`lerobot/outputs/libero_goal_prior_v3/seed_1000/stage2/checkpoints/030000/pretrained_model` exactly as in §1.
 
 **Learning rates that the reported numbers depend on.** Do not use the older `feat/goal-pose-prior-v3`
 branch — it predates this revision:
