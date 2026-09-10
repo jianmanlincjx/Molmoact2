@@ -109,6 +109,8 @@ SEED=1000 STEPS=30000 BATCH_SIZE=32 \
   bash scripts/libero_goal_prior/train_stage2.sh
 ```
 
+To skip Stage 1, start Stage 2 from the released prior: `POLICY_PATH=./LIT_ckpt/molmoact2/lit_stage1` in place of `STAGE1_OUTPUT_DIR`.
+
 Stage 1's SE(3) encoder is training-time scaffolding: Stage 2 discards it (6 unexpected keys at load) and the
 latents predict the pose from vision instead, so no privileged pose input exists at inference. Then evaluate
 `lerobot/outputs/libero_goal_prior/seed_1000/stage2/checkpoints/030000/pretrained_model` exactly as in §1.
