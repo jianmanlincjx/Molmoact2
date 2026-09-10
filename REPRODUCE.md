@@ -133,7 +133,7 @@ before committing GPU hours.
 
 ## 5. Checkpoints
 
-Released directories (Hugging Face, link in the LIT hub). Each is a self-contained LeRobot policy
+Released directories (https://huggingface.co/linjianman/LIT). Each is a self-contained LeRobot policy
 (`model.safetensors`, `config.json`, `train_config.json`, normaliser tensors) — pass the directory to
 `--policy.path`.
 
